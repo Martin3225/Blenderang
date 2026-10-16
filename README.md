@@ -364,6 +364,42 @@ Blender je jen editor nad ní.
 
 ---
 
+## Úvaha: úprava heightmapy terénu v Blenderu
+
+Zatím neimplementováno.
+
+**Proč ne celý terén najednou.** Terrain3D má výšku po 1 m; terén 7,7 × 4 km
+je 31 milionů vzorků. Takový mesh Blender v sculpt módu neutáhne a do kontextu
+jde terén záměrně po 16 m.
+
+**Návrh: úprava výřezu.**
+
+1. V Blenderu vybereš oblast (obdélník, nebo „kolem vybraného modelu“,
+   výchozí 256 × 256 m, max. 512 × 512 m).
+2. Godot vyexportuje výřez v plném rozlišení jako mřížku, kde jeden vrchol
+   odpovídá jednomu pixelu heightmapy (256 m → 66 tisíc vrcholů, sculpt to
+   zvládne). Okraj výřezu je ve vertex group a je zamčený, aby nevznikl schod.
+3. Sculptuješ, nebo použiješ modifikátory, Shrinkwrap pod modelem a podobně.
+4. **Odeslat terén do Godotu** z každého vrcholu vezme výšku a Godot ji zapíše
+   přes `set_height` do regionů jako jednu undo akci.
+
+**Co hlídat.**
+
+- Topologie se nesmí změnit (dyntopo, remesh, subdivide by mapování
+  vrchol → pixel rozbily) — odeslání to pozná podle počtu vrcholů a odmítne.
+- Konflikt: když mezitím někdo terén v té oblasti změnil v Godotu, odeslání
+  se odmítne (podpis dat výřezu z okamžiku exportu).
+- Control mapa (malování textur), díry a navigace zůstávají v Godotu.
+- Uložení: Godot zapíše jen změněné regiony při uložení scény (Terrain3D
+  `set_region_modified`).
+
+**Na co se to hodí:** srovnat terén pod zámkem, vymodelovat příkop, cestu nebo
+násep přesně k modelu — tam, kde nástroje Terrain3D nestačí nebo je potřeba
+vidět model. Plošné tvarování krajiny zůstává v Terrain3D, ten na to má lepší
+nástroje.
+
+---
+
 ## Co zbývá
 
 - Úprava heightmapy terénu v Blenderu (rozmyšleno, viz níže).
