@@ -1,0 +1,17 @@
+schema_version = "1.0.0"
+
+id = "blender_bridge"
+version = "0.1.0"
+name = "Blender Bridge"
+tagline = "Synchronizace rozmistovani objektu s Godot scenou"
+maintainer = "JanekRPG"
+type = "add-on"
+
+website = "https://github.com/"
+tags = ["Import-Export", "Scene"]
+
+blender_version_min = "4.2.0"
+license = ["SPDX:GPL-3.0-or-later"]
+
+[permissions]
+files = "Cteni manifestu a linkovani zdrojovych .blend souboru"
