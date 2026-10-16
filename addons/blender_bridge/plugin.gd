@@ -3,9 +3,10 @@ extends EditorPlugin
 
 ## Ovládání mostu Godot ↔ Blender.
 ##
-## Hlavní cesta má jeden klik na každé straně: [i]Otevřít scénu v Blenderu[/i]
-## tady, [i]Odeslat do Godotu[/i] v Blenderu. Změny z Blenderu se do otevřené
-## scény načtou samy, jakmile se manifest na disku změní.
+## Hlavní cesta má jeden klik na každé straně: [i]Otevřít v Blenderu[/i]
+## tady (tlačítko v liště 3D editoru, pravé tlačítko na tabu scény nebo na
+## [code].tscn[/code] ve FileSystemu), [i]Odeslat do Godotu[/i] v Blenderu.
+## Změny z Blenderu se do otevřené scény načtou samy.
 
 const MENU_NAME: String = "Blender Bridge"
 const WATCH_INTERVAL: float = 1.0
@@ -21,6 +22,8 @@ enum Action {
 }
 
 var _menu: PopupMenu
+var _toolbar_button: Button
+var _context_menus: Array[EditorContextMenuPlugin] = []
 var _watch: Timer
 ## Poslední obsah manifestu, o kterém plugin ví (zapsal ho sám, nebo ho už
 ## naimportoval). Jiný obsah na disku znamená změnu z Blenderu.
@@ -41,6 +44,22 @@ func _enter_tree() -> void:
 	_menu.id_pressed.connect(_on_action)
 	add_tool_submenu_item(MENU_NAME, _menu)
 
+	_toolbar_button = Button.new()
+	_toolbar_button.text = "Blender"
+	_toolbar_button.icon = BBIcons.blender()
+	_toolbar_button.flat = true
+	_toolbar_button.tooltip_text = "Otevřít scénu v Blenderu"
+	_toolbar_button.pressed.connect(_on_toolbar_pressed)
+	add_control_to_container(CONTAINER_SPATIAL_EDITOR_MENU, _toolbar_button)
+
+	for slot: int in [
+		EditorContextMenuPlugin.CONTEXT_SLOT_SCENE_TABS,
+		EditorContextMenuPlugin.CONTEXT_SLOT_FILESYSTEM,
+	]:
+		var menu: EditorContextMenuPlugin = preload("bb_context_menu.gd").new(open_scene_in_blender)
+		add_context_menu_plugin(slot, menu)
+		_context_menus.append(menu)
+
 	_watch = Timer.new()
 	_watch.wait_time = WATCH_INTERVAL
 	_watch.timeout.connect(_poll_manifest)
@@ -51,8 +70,35 @@ func _enter_tree() -> void:
 func _exit_tree() -> void:
 	remove_tool_menu_item(MENU_NAME)
 	_menu = null
+	remove_control_from_container(CONTAINER_SPATIAL_EDITOR_MENU, _toolbar_button)
+	_toolbar_button.queue_free()
+	_toolbar_button = null
+	for menu: EditorContextMenuPlugin in _context_menus:
+		remove_context_menu_plugin(menu)
+	_context_menus.clear()
 	_watch.queue_free()
 	_watch = null
+
+
+func _on_toolbar_pressed() -> void:
+	var root: Node = EditorInterface.get_edited_scene_root()
+	if root == null:
+		push_warning("Blender Bridge: není otevřená žádná scéna.")
+		return
+	_open_in_blender(root)
+
+
+## Vstup z kontextových menu. Scénu, která není v editoru aktivní, nejdřív
+## otevře — manifest i značky bb_id se berou z otevřeného stromu.
+func open_scene_in_blender(path: String) -> void:
+	var root: Node = EditorInterface.get_edited_scene_root()
+	if root == null or root.scene_file_path != path:
+		EditorInterface.open_scene_from_path(path)
+		root = EditorInterface.get_edited_scene_root()
+	if root == null or root.scene_file_path != path:
+		push_error("Blender Bridge: scénu %s se nepodařilo otevřít." % path)
+		return
+	_open_in_blender(root)
 
 
 func _on_action(id: int) -> void:

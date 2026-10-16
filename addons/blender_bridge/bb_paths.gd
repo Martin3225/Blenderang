@@ -21,10 +21,6 @@ extends RefCounted
 const OVERRIDE_EXTENSION: String = "bbsrc"
 const SOURCE_EXTENSION: String = "blend"
 
-## Metadatum na kořeni scény s cestou k layout souboru, když nemá ležet
-## vedle [code].tscn[/code].
-const META_LAYOUT: StringName = &"bb_layout"
-
 
 ## Cesta ke zdrojovému [code].blend[/code], relativně ke kořeni projektu
 ## (Blender o [code]res://[/code] neví). Prázdný řetězec znamená, že zdroj
@@ -77,25 +73,14 @@ static func write_override(asset_path: String, blend_path: String) -> bool:
 	return true
 
 
-## Layout scény. Výchozí je soubor vedle [code].tscn[/code]; kořen scény
-## může cestu přebít metadatem [constant META_LAYOUT].
-static func layout_for(scene_path: String, override: String = "") -> String:
-	if not override.is_empty():
-		return override.trim_prefix("res://")
-	return scene_path.trim_prefix("res://").get_basename() + "." + SOURCE_EXTENSION
-
-
 ## Kde leží zdroj pravdy pro geometrii assetu.
 ##
-## [code]local[/code] — geometrie je přímo v layout souboru scény, edituje
-## se bez skákání mezi soubory. Pro unikátní geometrii levelu a whitebox.
-## [code]library[/code] — vlastní [code].blend[/code], do layoutu linkovaný.
+## [code]library[/code] — vlastní [code].blend[/code], do Blenderu se
+## linkuje a upravuje se v něm.
 ## [code]none[/code] — zdroj chybí; Blender ukáže model z [code].glb[/code]
 ## a nabídne z něj zdroj vyrobit.
-static func tier_for(asset_path: String, layout: String) -> String:
-	var source: String = source_for(asset_path)
-	if source.is_empty():
-		return "none"
-	if source == layout:
-		return "local"
-	return "library"
+##
+## Scéna sama žádný .blend nemá: rozmístění je vždycky v [code].tscn[/code]
+## a Blender si ho pokaždé postaví z manifestu.
+static func tier_for(asset_path: String) -> String:
+	return "none" if source_for(asset_path).is_empty() else "library"

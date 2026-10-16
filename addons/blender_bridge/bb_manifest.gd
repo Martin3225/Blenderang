@@ -19,17 +19,11 @@ const COORD_SYSTEM: String = "godot_y_up"
 
 class Walk extends RefCounted:
 	var nodes: Array = []
-	var layout: String = ""
 	var duplicates: Array[Node] = []
-
-
-static func layout_of(root: Node) -> String:
-	return BBPaths.layout_for(root.scene_file_path, str(root.get_meta(BBPaths.META_LAYOUT, "")))
 
 
 static func export_scene(root: Node) -> Dictionary:
 	var walk: Walk = Walk.new()
-	walk.layout = layout_of(root)
 	BBOwnership.collect_ids(root, walk.duplicates)
 	_walk_children(root, root, walk)
 	return {
@@ -37,7 +31,6 @@ static func export_scene(root: Node) -> Dictionary:
 		"coord_system": COORD_SYSTEM,
 		"scene": root.scene_file_path,
 		"root_name": root.name,
-		"layout_blend": walk.layout,
 		"nodes": walk.nodes,
 	}
 
@@ -95,7 +88,7 @@ static func _walk_children(node: Node, root: Node, walk: Walk) -> void:
 
 static func _visit(node: Node, root: Node, walk: Walk) -> void:
 	if BBOwnership.is_blender_owned(node):
-		walk.nodes.append(_prop_entry(node, root, walk))
+		walk.nodes.append(_prop_entry(node, root))
 		return
 	if not node is Node3D:
 		_walk_children(node, root, walk)
@@ -131,7 +124,7 @@ static func _is_container(node: Node) -> bool:
 	return node.scene_file_path.is_empty()
 
 
-static func _prop_entry(node: Node, root: Node, walk: Walk) -> Dictionary:
+static func _prop_entry(node: Node, root: Node) -> Dictionary:
 	var node3d: Node3D = node as Node3D
 	var entry: Dictionary = {
 		"bb_id": BBOwnership.get_id(node),
@@ -141,9 +134,13 @@ static func _prop_entry(node: Node, root: Node, walk: Walk) -> Dictionary:
 		"parent": str(root.get_path_to(node.get_parent())),
 		"src": node.scene_file_path,
 		"xform": _serialize_xform(global_xform(node3d, root)),
+		"tier": BBPaths.tier_for(node.scene_file_path),
 	}
+	# Obálka slouží jako kontext při úpravě jiného assetu v jeho vlastním
+	# .blend — je vidět, co stojí kolem, aniž by se cokoli importovalo.
+	if node3d != null:
+		entry["bounds"] = _serialize_aabb(_subtree_aabb(node3d))
 	var source: String = BBPaths.source_for(node.scene_file_path)
-	entry["tier"] = BBPaths.tier_for(node.scene_file_path, walk.layout)
 	if source.is_empty():
 		entry["src_blend_missing"] = BBPaths.expected_source_for(node.scene_file_path)
 	else:

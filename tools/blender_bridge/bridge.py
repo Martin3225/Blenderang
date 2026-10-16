@@ -1,8 +1,11 @@
 """Jádro mostu mezi Godot manifestem a Blender scénou.
 
 Manifest nese pouze identity a transformace. Geometrie se nikdy nepřenáší —
-assety se do layoutu linkují ze svých zdrojových .blend souborů, nebo leží
-lokálně přímo v layoutu (tier ``local``).
+assety se do Blenderu linkují ze svých zdrojových .blend souborů, nebo se
+naimportují z .glb jako náhled.
+
+Scéna sama žádný .blend nemá. Rozmístění je vždycky v .tscn a Blender si ho
+pokaždé postaví z manifestu, takže se s Godotem nemůže rozejít.
 """
 
 from __future__ import annotations
@@ -188,8 +191,6 @@ def _resolve_source(
     """
     tier = entry.get("tier", "none")
     stem = os.path.basename(entry.get("src", "")).rsplit(".", 1)[0]
-    if tier == "local":
-        return _local_collection(stem, sources)
     if tier == "library":
         blend_path = os.path.join(root, entry["src_blend"])
         if not os.path.isfile(blend_path):
@@ -420,21 +421,32 @@ def _xform_differs(left: list[float], right: list[float], epsilon: float = 1e-5)
 # ------------------------------------------------------- přesun zdroje pravdy
 
 
-def override_path(root: str, asset_src: str) -> str:
-    """Soubor ``<asset>.bbsrc``, kterým se přebíjí konvence hledání zdroje."""
-    return os.path.join(root, asset_src.replace("res://", "", 1) + ".bbsrc")
-
-
 def expected_source(asset_src: str) -> str:
     """Konvence: zdroj leží vedle assetu se stejným názvem."""
     return os.path.splitext(asset_src.replace("res://", "", 1))[0] + ".blend"
 
 
+def asset_abs(root: str, asset_src: str) -> str:
+    return os.path.join(root, asset_src.replace("res://", "", 1))
+
+
+def ensure_exporter(collection: bpy.types.Collection, target: str) -> None:
+    """Collection Exporter na glTF do cesty assetu. Uložení zdroje pak
+    regeneruje .glb a Godot ho reimportuje."""
+    for exporter in collection.exporters:
+        if _same_file(bpy.path.abspath(exporter.export_properties.filepath), target):
+            return
+    with bpy.context.temp_override(collection=collection):
+        bpy.ops.collection.exporter_add(name="IO_FH_gltf2")
+    collection.exporters[-1].export_properties.filepath = target
+
+
 def promote_to_library(obj: bpy.types.Object, root: str) -> str:
     """Z náhledu naimportovaného z .glb udělá samostatný zdrojový .blend.
 
-    Kolekce se zapíše do nového souboru vedle assetu, lokální kopie se zruší
-    a místo ní se soubor nalinkuje — od té chvíle je zdrojem pravdy .blend.
+    Kolekce se zapíše do nového souboru vedle assetu i s nastaveným
+    exportem, lokální kopie se zruší a místo ní se soubor nalinkuje — od té
+    chvíle je zdrojem pravdy .blend.
     """
     collection = obj.instance_collection
     if collection is None:
@@ -444,7 +456,11 @@ def promote_to_library(obj: bpy.types.Object, root: str) -> str:
 
     asset_src = str(obj.get(P_SRC, ""))
     target = os.path.join(root, expected_source(asset_src))
+    if os.path.exists(target):
+        raise BridgeError("%s už existuje; vyber ho v Godotu jako zdroj" % target)
     os.makedirs(os.path.dirname(target), exist_ok=True)
+    collection.pop(P_PREVIEW, None)
+    ensure_exporter(collection, asset_abs(root, asset_src))
     bpy.data.libraries.write(target, {collection}, fake_user=True)
 
     name = collection.name
@@ -458,31 +474,122 @@ def promote_to_library(obj: bpy.types.Object, root: str) -> str:
     return target
 
 
-def promote_to_local(obj: bpy.types.Object, root: str, layout_relative: str) -> str:
-    """Nechá geometrii v layoutu a zapíše ``.bbsrc``, ať to Godot ví.
+# ------------------------------------------------------------ úprava zdroje
+#
+# „Upravit zdroj“ otevře .blend jednoho assetu. Aby nechybělo okolí, postaví
+# se do něj z manifestu dočasná kolekce BB_Context s obálkami všeho ostatního
+# ze scény, posunutá tak, jako by asset stál na svém místě. Kontext se před
+# každým uložením odebere a po uložení vrátí — do zdrojového souboru se nikdy
+# nezapíše.
 
-    Pro unikátní geometrii levelu — edituje se přímo, bez skákání do jiného
-    souboru. Daní je, že layout drží geometrii, takže v něm nikdo jiný
-    současně rozmisťovat nemůže.
+COLL_CONTEXT = "BB_Context"
+EDIT_MARKER = "bb_edit.json"
+
+
+def _marker_path(root: str) -> str:
+    return os.path.join(root, ".pipeline", EDIT_MARKER)
+
+
+def begin_edit(scene: bpy.types.Scene, obj: bpy.types.Object) -> str:
+    """Odešle rozpracované přesuny do Godotu a připraví úpravu zdroje.
+
+    Vrátí cestu ke zdrojovému .blend, který se má otevřít.
     """
-    collection = obj.instance_collection
+    root = scene.get(S_ROOT, "")
+    relative = obj.get(P_SRC_BLEND, "")
+    if not root or not relative:
+        raise BridgeError("asset nemá zdrojový .blend")
+    source = os.path.join(root, relative)
+    if not os.path.isfile(source):
+        raise BridgeError("zdroj neexistuje: %s" % source)
+    manifest = stored_manifest_path(scene)
+    export(scene)
+    with open(_marker_path(root), "w", encoding="utf-8") as handle:
+        json.dump({
+            "manifest": manifest,
+            "bb_id": str(obj.get(P_ID, "")),
+            "source": source,
+            "asset": str(obj.get(P_SRC, "")),
+            "collection": obj.instance_collection.name if obj.instance_collection else "",
+        }, handle)
+    return source
+
+
+def edit_session() -> dict[str, Any] | None:
+    """Údaje o rozpracované úpravě, pokud je otevřený právě její zdroj."""
+    if not bpy.data.filepath:
+        return None
+    current = os.path.dirname(os.path.abspath(bpy.data.filepath))
+    while current and current != os.path.dirname(current):
+        marker = os.path.join(current, ".pipeline", EDIT_MARKER)
+        if os.path.isfile(marker):
+            with open(marker, "r", encoding="utf-8") as handle:
+                session = json.load(handle)
+            if _same_file(session.get("source", ""), bpy.data.filepath):
+                session["root"] = current
+                return session
+            return None
+        current = os.path.dirname(current)
+    return None
+
+
+def end_edit(session: dict[str, Any]) -> str:
+    """Ukončí úpravu; vrátí manifest, ze kterého se má scéna znovu postavit."""
+    marker = _marker_path(session["root"])
+    if os.path.isfile(marker):
+        os.remove(marker)
+    return session["manifest"]
+
+
+def build_context(session: dict[str, Any]) -> int:
+    """Postaví zamčené obálky okolí kolem upravovaného assetu."""
+    clear_context()
+    manifest = load_manifest(session["manifest"])
+    focus = next(
+        (e for e in manifest["nodes"] if e.get("bb_id") == session["bb_id"]),
+        None,
+    )
+    if focus is None:
+        return 0
+    to_local = godot_to_blender(focus["xform"]).inverted()
+
+    context = bpy.data.collections.new(COLL_CONTEXT)
+    bpy.context.scene.collection.children.link(context)
+    context.hide_select = True
+    built = 0
+    for entry in manifest["nodes"]:
+        if entry is focus or "bounds" not in entry:
+            continue
+        obj = bpy.data.objects.new(entry["name"], _make_proxy_mesh(entry["name"], entry["bounds"]))
+        obj.display_type = "WIRE"
+        obj.hide_select = True
+        obj.matrix_world = to_local @ godot_to_blender(entry["xform"])
+        context.objects.link(obj)
+        built += 1
+    return built
+
+
+def clear_context() -> None:
+    context = bpy.data.collections.get(COLL_CONTEXT)
+    if context is None:
+        return
+    for obj in list(context.objects):
+        mesh = obj.data
+        bpy.data.objects.remove(obj, do_unlink=True)
+        if mesh is not None and mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+    bpy.data.collections.remove(context)
+
+
+def collection_has_exporter(session: dict[str, Any]) -> bool:
+    collection = bpy.data.collections.get(session.get("collection", ""))
+    return collection is not None and len(collection.exporters) > 0
+
+
+def setup_session_exporter(session: dict[str, Any]) -> str:
+    collection = bpy.data.collections.get(session.get("collection", ""))
     if collection is None:
-        raise BridgeError("objekt nemá co uložit; chybí i .glb náhled")
-    if collection.library is not None:
-        raise BridgeError("linkovaný asset nejde zlokalizovat; nejdřív ho odpoj")
-
-    if not os.path.isfile(os.path.join(root, layout_relative)):
-        raise BridgeError(
-            "layout musí být nejdřív uložený jako %s, jinak Godot zdroj nenajde" % layout_relative
-        )
-
-    asset_src = str(obj.get(P_SRC, ""))
-    marker = override_path(root, asset_src)
-    os.makedirs(os.path.dirname(marker), exist_ok=True)
-    with open(marker, "w", encoding="utf-8") as handle:
-        handle.write(layout_relative)
-
-    collection.pop(P_PREVIEW, None)
-    obj[P_TIER] = "local"
-    obj[P_SRC_BLEND] = layout_relative
-    return marker
+        raise BridgeError("v souboru chybí kolekce %s" % session.get("collection"))
+    target = asset_abs(session["root"], session["asset"])
+    ensure_exporter(collection, target)
+    return target
