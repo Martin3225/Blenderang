@@ -65,12 +65,12 @@ lod0_range = 128.0
 [sub_resource type="Terrain3DAssets" id="Terrain3DAssets_ro8ku"]
 mesh_list = Array[Terrain3DMeshAsset]([SubResource("Terrain3DMeshAsset_3m06j")])
 
-[node name="TerrainScene" type="Node3D" unique_id=1620433059]
+[node name="TerrainScene" type="Node3D" unique_id=337382319]
 
-[node name="Nav" type="NavigationRegion3D" parent="." unique_id=1497378266]
+[node name="Nav" type="NavigationRegion3D" parent="." unique_id=872285943]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 100, 5, 100)
 
-[node name="Terrain3D" type="Terrain3D" parent="Nav" unique_id=715237679]
+[node name="Terrain3D" type="Terrain3D" parent="Nav" unique_id=1421883346]
 data_directory = "res://fixtures/terrain_data"
 material = SubResource("Terrain3DMaterial_q5ape")
 assets = SubResource("Terrain3DAssets_ro8ku")
@@ -78,5 +78,5 @@ show_checkered = true
 top_level = true
 metadata/_edit_lock_ = true
 
-[node name="CrateOnHill" parent="Nav" unique_id=1376625779 instance=ExtResource("1_4mdgc")]
+[node name="CrateOnHill" parent="Nav" unique_id=844525029 instance=ExtResource("1_4mdgc")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 28, 15, 28)

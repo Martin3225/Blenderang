@@ -69,10 +69,10 @@ func _phase_open_and_watch(bridge: EditorPlugin) -> void:
 			marked.append(str(node.name))
 	marked.sort()
 	_record("první otevření označí art instance",
-		marked == PackedStringArray(["Barrel", "Character", "Crate", "Detached", "InRotated", "Tower"]), "označeno: %s" % [marked])
+		marked == PackedStringArray(["Barrel", "Character", "Crate", "Detached", "Helmet", "InRotated", "Tower"]), "označeno: %s" % [marked])
 
 	var saved: String = FileAccess.get_file_as_string("res://fixtures/scenes/basic.tscn")
-	_record("scéna je uložená i se značkami", saved.count("metadata/bb_id") == 6, "bb_id v souboru: %d" % saved.count("metadata/bb_id"))
+	_record("scéna je uložená i se značkami", saved.count("metadata/bb_id") == 7, "bb_id v souboru: %d" % saved.count("metadata/bb_id"))
 	# V editoru glTF export přeskakuje nody bez ownera — tady se to projeví,
 	# mimo editor ne.
 	var context: Dictionary = _glb_json("res://.pipeline/basic.context.glb")

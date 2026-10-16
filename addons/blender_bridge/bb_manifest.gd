@@ -93,6 +93,11 @@ static func _walk_children(node: Node, root: Node, walk: Walk) -> void:
 static func _visit(node: Node, root: Node, walk: Walk) -> void:
 	if BBOwnership.is_blender_owned(node):
 		walk.nodes.append(_prop_entry(node, root))
+		# Děti přidané ve scéně (výstroj na armatuře, marker na modelu) jsou
+		# samostatné nody. Vnitřek instancovaného assetu ne — ten patří assetu.
+		for child: Node in node.get_children():
+			if child.owner == root:
+				_visit(child, root, walk)
 		return
 	if not node is Node3D:
 		_walk_children(node, root, walk)

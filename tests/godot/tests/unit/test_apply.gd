@@ -132,6 +132,38 @@ func test_delete_in_blender_removes_node() -> void:
 	done()
 
 
+func test_parent_and_child_moved_together() -> void:
+	var setup: Array = _setup()
+	var root: Node = setup[0]
+	# V Blenderu se posunul rodič a dítě (jeho potomek) se posunulo s ním.
+	_set_origin(setup[2], "Character", Vector3(7, 0, -2))
+	_set_origin(setup[2], "Helmet", Vector3(7, 1.8, -2))
+	_apply(root, setup[2], setup[1])
+	near(_world(root, "Character").origin, Vector3(7, 0, -2), "rodič")
+	near(_world(root, "Character/Helmet").origin, Vector3(7, 1.8, -2), "dítě se neposune dvakrát")
+	near((root.get_node("Character/Helmet") as Node3D).position, Vector3(0, 1.8, 0), "lokální pozice dítěte beze změny")
+	done()
+
+
+func test_child_survives_deleted_parent() -> void:
+	var setup: Array = _setup()
+	var root: Node = setup[0]
+	var kept: Array = []
+	for item: Dictionary in setup[2]["nodes"]:
+		if item.get("name") != "Character":
+			kept.append(item)
+	setup[2]["nodes"] = kept
+	var plan: BBApply.Plan = _apply(root, setup[2], setup[1])
+	check(root.get_node_or_null("Character") == null, "rodič smazaný")
+	var helmet: Node3D = root.get_node_or_null("Helmet")
+	check(helmet != null, "dítě, které v Blenderu zůstalo, je pod nejbližším předkem")
+	if helmet != null:
+		eq(BBOwnership.get_id(helmet), "id_helmet", "stejné id")
+		near(_world(root, "Helmet").origin, Vector3(5, 1.8, -2), "na stejném místě")
+	eq(plan.added.size(), 1, "dítě se přidá znovu")
+	done()
+
+
 func test_node_marked_after_export_is_not_deleted() -> void:
 	var setup: Array = _setup()
 	var root: Node = setup[0]

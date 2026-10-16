@@ -9,7 +9,7 @@ import blender_bridge.bridge as bridge
 from harness import ASSETS, BridgeCase, godot_to_blender_point
 import harness
 
-MODELS = ("Barrel", "Character", "Crate", "Detached", "InRotated", "Tower")
+MODELS = ("Barrel", "Character", "Crate", "Detached", "Helmet", "InRotated", "Tower")
 
 
 def write_source(asset: str, collection_name: str) -> str:
@@ -220,3 +220,77 @@ class DetailTest(BridgeCase):
         helper = bpy.data.objects.new("Pomocna", None)
         bpy.context.scene.collection.objects.link(helper)
         self.assertEqual(bridge.describe(helper)[0], "helper")
+
+
+class HierarchyTest(BridgeCase):
+    def test_child_model_is_parented_and_follows(self):
+        self.open_scene()
+        helmet = bpy.data.objects["Helmet"]
+        character = bpy.data.objects["Character"]
+        self.assertIs(helmet.parent, character)
+        self.assertVectorAlmostEqual(helmet.matrix_world.translation, godot_to_blender_point(5, 1.8, -2))
+        character.location.x += 2
+        bridge.export(bpy.context.scene)
+        sent = self.entry(self.read_manifest(), "Helmet")["xform"]
+        self.assertAlmostEqual(sent[9], 7.0, places=4, msg="posun rodiče se pošle i u dítěte")
+
+    def test_empties_are_about_one_metre(self):
+        self.open_scene()
+        empties = [o for o in self.collection_objects(bridge.COLL_LOCKED) if o.type == "EMPTY"]
+        self.assertTrue(empties)
+        for obj in empties:
+            world = obj.empty_display_size * max(abs(v) for v in obj.matrix_world.to_scale())
+            self.assertAlmostEqual(world, 1.0, places=3, msg=obj.name)
+
+
+class ChooseSourceTest(BridgeCase):
+    def test_choose_source_anywhere_in_project(self):
+        source = os.path.join(harness.PROJECT, "fixtures", "shared_props.blend")
+        write_source("../shared_props.blend", "props_library")
+        scene = self.open_scene()
+        relative = bridge.choose_source(scene, "res://fixtures/assets/crate.glb", source)
+        self.assertEqual(relative, "fixtures/shared_props.blend")
+        with open(os.path.join(harness.ASSETS, "crate.glb.bbsrc"), encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), "fixtures/shared_props.blend", "Godot čte stejný soubor")
+        for name in ("Crate", "InRotated", "Detached"):
+            obj = bpy.data.objects[name]
+            self.assertEqual(obj.get(bridge.P_TIER), "library", name)
+            self.assertIsNotNone(obj.instance_collection.library, name)
+        os.remove(source)
+
+    def test_chosen_source_survives_reload(self):
+        source = os.path.join(harness.PROJECT, "fixtures", "shared_props.blend")
+        write_source("../shared_props.blend", "props_library")
+        scene = self.open_scene()
+        bridge.choose_source(scene, "res://fixtures/assets/crate.glb", source)
+        bpy.ops.bb.rebuild()
+        self.assertEqual(bpy.data.objects["Crate"].get(bridge.P_SRC_BLEND), "fixtures/shared_props.blend")
+        os.remove(source)
+
+    def test_source_outside_project_is_refused(self):
+        outside = os.path.join(os.path.dirname(harness.PROJECT), "outside.blend")
+        bpy.data.libraries.write(outside, set(), fake_user=True)
+        scene = self.open_scene()
+        with self.assertRaisesRegex(bridge.BridgeError, "v projektu"):
+            bridge.choose_source(scene, "res://fixtures/assets/crate.glb", outside)
+        self.assertFalse(os.path.exists(os.path.join(harness.ASSETS, "crate.glb.bbsrc")))
+        os.remove(outside)
+
+    def test_choosing_sibling_needs_no_marker(self):
+        source = write_source("crate.blend", "crate")
+        scene = self.open_scene()
+        self.assertEqual(bridge.choose_source(scene, "res://fixtures/assets/crate.glb", source), "fixtures/assets/crate.blend")
+        self.assertFalse(os.path.exists(os.path.join(harness.ASSETS, "crate.glb.bbsrc")))
+
+    def test_clear_source_returns_to_preview(self):
+        source = os.path.join(harness.PROJECT, "fixtures", "shared_props.blend")
+        write_source("../shared_props.blend", "props_library")
+        scene = self.open_scene()
+        bridge.choose_source(scene, "res://fixtures/assets/crate.glb", source)
+        bridge.clear_source(scene, "res://fixtures/assets/crate.glb")
+        self.assertFalse(os.path.exists(os.path.join(harness.ASSETS, "crate.glb.bbsrc")))
+        crate = bpy.data.objects["Crate"]
+        self.assertEqual(crate.get(bridge.P_TIER), "none")
+        self.assertIsNotNone(crate.instance_collection)
+        self.assertIsNone(crate.instance_collection.library)
+        os.remove(source)

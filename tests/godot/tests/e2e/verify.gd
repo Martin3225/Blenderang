@@ -19,7 +19,7 @@ func _run() -> void:
 	var manifest: Dictionary = BBApply.read_json("res://.pipeline/basic.json")
 	var baseline: Dictionary = BBApply.read_json("res://.pipeline/basic.last.json")
 	var plan: BBApply.Plan = BBApply.plan(root, manifest, baseline)
-	_record("plán změn", plan.moved.size() == 2 and plan.added.size() == 1 and plan.removed.size() == 1 and plan.unresolved.is_empty(),
+	_record("plán změn", plan.moved.size() == 4 and plan.added.size() == 1 and plan.removed.size() == 1 and plan.unresolved.is_empty(),
 		plan.summary())
 	BBApply.new().execute(BBApply.operations(root, plan))
 
@@ -43,6 +43,8 @@ func _run() -> void:
 		_record("duplikát má vlastní id", BBOwnership.get_id(copy) != BBOwnership.get_id(root.get_node("Props/Tower")), "")
 		_record("duplikát stojí na místě z Blenderu", _origin(root, "Props/TowerCopy").is_equal_approx(Vector3(1, 0, 1)),
 			str(_origin(root, "Props/TowerCopy")))
+	_record("výstroj se posunula s modelem a zůstala jeho dítětem",
+		_origin(root, "Character/Helmet").is_equal_approx(Vector3(7, 1.8, -2)), str(_origin(root, "Character/Helmet")))
 	_record("smazaný Barrel je pryč", root.get_node_or_null("Props/Barrel") == null, "")
 	_record("pomocný objekt z Blenderu se nepropsal", root.find_child("Pomocna", true, false) == null, "")
 
@@ -50,7 +52,8 @@ func _run() -> void:
 	var after: Dictionary = E2E.snapshot(root)
 	var changed: PackedStringArray = []
 	for path: String in before:
-		if path.begins_with("Props/Crate") or path.begins_with("Rotated/InRotated") or path.begins_with("Props/Barrel"):
+		if path.begins_with("Props/Crate") or path.begins_with("Rotated/InRotated") or path.begins_with("Props/Barrel") \
+				or path.begins_with("Character"):
 			continue
 		if not after.has(path) or not E2E.same(before[path], after[path]):
 			changed.append(path)

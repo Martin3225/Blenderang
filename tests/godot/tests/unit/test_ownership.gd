@@ -9,7 +9,7 @@ func test_auto_mark_picks_art_instances() -> void:
 	for node: Node in mark_props(root):
 		names.append(str(node.name))
 	names.sort()
-	eq(names, PackedStringArray(["Barrel", "Character", "Crate", "Detached", "InRotated", "Tower"]),
+	eq(names, PackedStringArray(["Barrel", "Character", "Crate", "Detached", "Helmet", "InRotated", "Tower"]),
 		"označené art instance")
 	done()
 

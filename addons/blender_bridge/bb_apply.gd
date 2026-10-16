@@ -66,23 +66,59 @@ static func plan(root: Node, manifest: Dictionary, baseline: Dictionary) -> Plan
 			continue
 		result.removed.append(by_id[id])
 
+	_rescue_children(root, result, incoming, by_id)
 	return result
+
+
+## V Blenderu po smazání rodiče děti zůstanou, v Godotu by zmizely s ním.
+## Takové děti se přidají znovu pod nejbližšího předka, který zůstává.
+static func _rescue_children(root: Node, result: Plan, incoming: Dictionary, by_id: Dictionary) -> void:
+	if result.removed.is_empty():
+		return
+	for id: String in incoming:
+		var node: Node = by_id.get(id)
+		if node == null or result.removed.has(node) or not _under_removed(node.get_parent(), root, result.removed):
+			continue
+		var keeper: Node = node.get_parent()
+		while keeper != root and _under_removed(keeper, root, result.removed):
+			keeper = keeper.get_parent()
+		var entry: Dictionary = (incoming[id] as Dictionary).duplicate(true)
+		entry["parent"] = str(root.get_path_to(keeper))
+		result.added.append(entry)
+		for index: int in range(result.moved.size() - 1, -1, -1):
+			if result.moved[index]["node"] == node:
+				result.moved.remove_at(index)
+
+
+static func _under_removed(node: Node, root: Node, removed: Array[Node]) -> bool:
+	var current: Node = node
+	while current != null and current != root:
+		if removed.has(current):
+			return true
+		current = current.get_parent()
+	return false
 
 
 ## Převede plán na seznam konkrétních operací nad scénou. Nic nemění —
 ## samotný zápis dělá [method commit].
 static func operations(root: Node, plan_data: Plan) -> Array[Dictionary]:
 	var ops: Array[Dictionary] = []
+	# Nové světové transformace všech přesouvaných nodů. Lokální transformace
+	# dítěte se musí počítat vůči NOVÉ pozici rodiče — v Blenderu se dítě
+	# s rodičem posunulo, takže by se jinak posunulo dvakrát.
+	var targets: Dictionary = {}
+	for move: Dictionary in plan_data.moved:
+		targets[move["node"]] = move["xform"]
 	for move: Dictionary in plan_data.moved:
 		var node: Node3D = move["node"]
 		ops.append({
 			"kind": "transform",
 			"node": node,
-			"to": _to_local(node, root, move["xform"]),
+			"to": _to_local(node, root, move["xform"], targets),
 			"from": node.transform,
 		})
 	for entry: Dictionary in plan_data.added:
-		var op: Dictionary = _build_add(root, entry, plan_data)
+		var op: Dictionary = _build_add(root, entry, plan_data, targets)
 		if not op.is_empty():
 			ops.append(op)
 	for node: Node in plan_data.removed:
@@ -137,7 +173,7 @@ static func commit(root: Node, ops: Array[Dictionary], undo: EditorUndoRedoManag
 	undo.commit_action()
 
 
-static func _build_add(root: Node, entry: Dictionary, plan_data: Plan) -> Dictionary:
+static func _build_add(root: Node, entry: Dictionary, plan_data: Plan, targets: Dictionary) -> Dictionary:
 	var source: String = str(entry.get("src", ""))
 	var packed: PackedScene = load(source) as PackedScene
 	if packed == null:
@@ -151,7 +187,7 @@ static func _build_add(root: Node, entry: Dictionary, plan_data: Plan) -> Dictio
 	node.set_meta(BBOwnership.META_ID, str(entry.get("bb_id", "")))
 	var node3d: Node3D = node as Node3D
 	if node3d != null:
-		node3d.transform = _to_local_under(parent, root, _deserialize(entry.get("xform", [])))
+		node3d.transform = _to_local_under(parent, root, _deserialize(entry.get("xform", [])), targets)
 	return {"kind": "add", "node": node, "parent": parent, "owner": root}
 
 
@@ -178,14 +214,26 @@ static func _deserialize(xform: Array) -> Transform3D:
 ## Manifest nese transformaci vůči kořeni scény. Node ale drží lokální,
 ## takže se musí odečíst transformace rodičovského řetězce — kromě nodu
 ## s [code]top_level[/code], jehož transformace už globální je.
-static func _to_local(node: Node3D, root: Node, world: Transform3D) -> Transform3D:
+static func _to_local(node: Node3D, root: Node, world: Transform3D, targets: Dictionary) -> Transform3D:
 	if node.top_level:
 		return world
-	return _to_local_under(node.get_parent(), root, world)
+	return _to_local_under(node.get_parent(), root, world, targets)
 
 
-static func _to_local_under(parent: Node, root: Node, world: Transform3D) -> Transform3D:
-	var parent3d: Node3D = parent as Node3D
-	if parent3d == null or parent == root:
-		return world
-	return BBManifest.global_xform(parent3d, root).affine_inverse() * world
+static func _to_local_under(parent: Node, root: Node, world: Transform3D, targets: Dictionary) -> Transform3D:
+	return _planned_global(parent, root, targets).affine_inverse() * world
+
+
+## Světová transformace nodu po provedení plánu: přesouvané nody mají
+## novou, ostatní skládají rodiče (včetně těch přesouvaných).
+static func _planned_global(node: Node, root: Node, targets: Dictionary) -> Transform3D:
+	if node == null or node == root:
+		return Transform3D.IDENTITY
+	if targets.has(node):
+		return targets[node]
+	var spatial: Node3D = node as Node3D
+	if spatial == null:
+		return _planned_global(node.get_parent(), root, targets)
+	if spatial.top_level:
+		return spatial.transform
+	return _planned_global(node.get_parent(), root, targets) * spatial.transform

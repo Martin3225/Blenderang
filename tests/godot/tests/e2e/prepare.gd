@@ -25,7 +25,7 @@ func _run() -> void:
 		if BBOwnership.is_auto_markable(node, root):
 			BBOwnership.assign_id(node, taken)
 			taken[BBOwnership.get_id(node)] = node
-	_record("označeno 6 modelů", taken.size() == 6, str(taken.size()))
+	_record("označeno 7 modelů", taken.size() == 7, str(taken.size()))
 
 	var packed: PackedScene = PackedScene.new()
 	packed.pack(root)

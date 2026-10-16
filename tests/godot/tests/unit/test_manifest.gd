@@ -63,6 +63,29 @@ func test_owned_node_inside_context_is_found() -> void:
 	done()
 
 
+func test_children_of_model_are_exported() -> void:
+	var root: Node = scene("basic")
+	mark_props(root)
+	var manifest: Dictionary = BBManifest.export_scene(root)
+	var helmet: Dictionary = entry(manifest, "Helmet")
+	eq(helmet.get("owner"), "blender", "výstroj na modelu jde do Blenderu")
+	eq(helmet.get("parent"), "Character", "rodič je model")
+	near(origin_of(helmet), Vector3(5, 1.8, -2), "světová pozice dítěte")
+	var socket: Dictionary = entry(manifest, "Socket")
+	eq(socket.get("owner"), "godot", "marker na modelu je kontext")
+	near(origin_of(socket), Vector3(5, 1, -2), "pozice markeru")
+	done()
+
+
+func test_inside_of_model_asset_is_not_exported() -> void:
+	var root: Node = scene("basic")
+	mark_props(root)
+	var manifest: Dictionary = BBManifest.export_scene(root)
+	for item: Dictionary in manifest["nodes"]:
+		check(not str(item["path"]).begins_with("Props/Crate/"), "vnitřek crate.glb: %s" % item["path"])
+	done()
+
+
 func test_bounds_cover_whole_subtree() -> void:
 	var root: Node = scene("basic")
 	mark_props(root)

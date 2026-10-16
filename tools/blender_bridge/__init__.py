@@ -179,6 +179,52 @@ class BB_OT_edit_source(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class BB_OT_choose_source(bpy.types.Operator, ImportHelper):
+    """Vybere existující .blend jako zdroj modelu (pro všechny jeho instance)"""
+
+    bl_idname = "bb.choose_source"
+    bl_label = "Vybrat zdroj…"
+
+    filename_ext = ".blend"
+    filter_glob: StringProperty(default="*.blend", options={"HIDDEN"})
+    name: StringProperty(options={"HIDDEN", "SKIP_SAVE"})
+
+    def invoke(self, context: bpy.types.Context, event: bpy.types.Event) -> set[str]:
+        obj = _target(context, self.name)
+        root = context.scene.get(bridge.S_ROOT, "")
+        if obj is not None and root:
+            # Prohlížeč začne vedle assetu, kde zdroj podle konvence leží.
+            self.filepath = os.path.join(root, bridge.expected_source(str(obj.get(bridge.P_SRC, ""))))
+        return ImportHelper.invoke(self, context, event)
+
+    def execute(self, context: bpy.types.Context) -> set[str]:
+        obj = _target(context, self.name)
+        if obj is None or bridge.P_ID not in obj:
+            return _report(self, bridge.BridgeError("vyber model"))
+        try:
+            relative = bridge.choose_source(context.scene, str(obj.get(bridge.P_SRC, "")), self.filepath)
+        except (bridge.BridgeError, OSError) as error:
+            return _report(self, error)
+        self.report({"INFO"}, "Zdroj: %s" % relative)
+        return {"FINISHED"}
+
+
+class BB_OT_clear_source(bpy.types.Operator):
+    """Zruší ručně vybraný zdroj; platí zase .blend vedle assetu, jinak náhled"""
+
+    bl_idname = "bb.clear_source"
+    bl_label = "Zrušit výběr zdroje"
+
+    name: StringProperty(options={"HIDDEN", "SKIP_SAVE"})
+
+    def execute(self, context: bpy.types.Context) -> set[str]:
+        obj = _target(context, self.name)
+        if obj is None or bridge.P_ID not in obj:
+            return _report(self, bridge.BridgeError("vyber model"))
+        bridge.clear_source(context.scene, str(obj.get(bridge.P_SRC, "")))
+        return {"FINISHED"}
+
+
 class BB_OT_select_model(bpy.types.Operator):
     """Vybere model a zaměří na něj pohled"""
 
@@ -355,6 +401,14 @@ class BB_PT_detail(bpy.types.Panel):
         kind, rows = bridge.describe(obj)
         if kind == "model":
             layout.label(text=obj.name, icon="OBJECT_DATA")
+            actions = layout.row(align=True)
+            if obj.get(bridge.P_TIER) == "library":
+                actions.operator(BB_OT_edit_source.bl_idname, text="Upravit", icon="EDITMODE_HLT").name = obj.name
+            else:
+                actions.operator(BB_OT_promote_source.bl_idname, text="Vyrobit zdroj", icon="FILE_NEW").name = obj.name
+            actions.operator(BB_OT_choose_source.bl_idname, icon="FILEBROWSER").name = obj.name
+            if bridge.has_override(context.scene.get(bridge.S_ROOT, ""), str(obj.get(bridge.P_SRC, ""))):
+                layout.operator(BB_OT_clear_source.bl_idname, icon="X").name = obj.name
         elif kind == "godot":
             layout.label(text="%s — z Godotu" % obj.name, icon="LOCKED")
             layout.label(text="Jen pro orientaci, změny se neposílají.")
@@ -375,6 +429,8 @@ _CLASSES = (
     BB_OT_rebuild,
     BB_OT_promote_source,
     BB_OT_edit_source,
+    BB_OT_choose_source,
+    BB_OT_clear_source,
     BB_OT_select_model,
     BB_OT_return_to_scene,
     BB_PT_panel,

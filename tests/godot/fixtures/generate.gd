@@ -12,6 +12,8 @@ extends SceneTree
 ##   Building      StaticBody3D s meshem, kolizí a vnořenou Decoration
 ##                 (vnořená instance pod tělesem se NEoznačí)
 ##   Character     riggovaný .glb (označí se)
+##     Helmet      art instance jako dítě modelu (výstroj na armatuře; označí se)
+##     Socket      Marker3D pod modelem — kontext
 ##   Spawn, Sun    Marker3D a světlo — jen kontext
 ##   Logic/Floating  Node3D pod obyčejným Node — kontext s meshem
 ## second.tscn — malá druhá scéna pro otevírání z kontextového menu
@@ -109,7 +111,11 @@ func _basic() -> Node:
 	shape.position = Vector3(0, 1.5, 0)
 	_instance(building, root, "crate.glb", "Decoration", Vector3(0, 3, 0))
 
-	_instance(root, root, "rig.glb", "Character", Vector3(5, 0, -2))
+	var character: Node3D = _instance(root, root, "rig.glb", "Character", Vector3(5, 0, -2))
+	# Jako výstroj na armature_f: art instance přidané ve scéně jako děti modelu.
+	_instance(character, root, "crate.glb", "Helmet", Vector3(0, 1.8, 0))
+	var socket: Marker3D = _add(character, Marker3D.new(), root, "Socket")
+	socket.position = Vector3(0, 1, 0)
 
 	var spawn: Marker3D = _add(root, Marker3D.new(), root, "Spawn")
 	spawn.position = Vector3(1, 0, 1)

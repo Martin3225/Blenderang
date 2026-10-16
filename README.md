@@ -104,8 +104,10 @@ Panel `N ▸ Bridge`:
   Vedle je **Upravit** (model má zdrojový `.blend`), nebo **Vyrobit zdroj**
   (model je zatím jen náhled z `.glb`).
 - **Detail** — o vybraném objektu: u modelu node v Godotu, rodič, asset,
-  zdrojový `.blend` (nebo kam se vyrobí) a id; u objektu z Godotu, ke kterému
-  nodu patří; u ostatního, že je to pomocný objekt, který se neposílá.
+  zdrojový `.blend` (nebo kam se vyrobí) a id, plus tlačítka **Upravit** /
+  **Vyrobit zdroj**, **Vybrat zdroj…** a **Zrušit výběr zdroje**; u objektu
+  z Godotu, ke kterému nodu patří; u ostatního, že je to pomocný objekt,
+  který se neposílá.
 - Pokud se něco nepodařilo načíst (vadný asset, vadný kontext), panel to
   vypíše červeně. Scéna se i tak dostaví — vadný model zůstane jako osa na
   svém místě, místo vadného kontextu jsou obálky.
@@ -113,9 +115,13 @@ Panel `N ▸ Bridge`:
 V outlineru:
 
 - `BB_Layout` — modely, se kterými můžeš hýbat, otáčet je, duplikovat
-  (`Shift+D`) a mazat. Každý je vidět jednou, na svém místě.
+  (`Shift+D`) a mazat. Každý je vidět jednou, na svém místě. Model, který je
+  v Godotu dítětem jiného modelu (výstroj na `armature_f`), je v Blenderu jeho
+  potomkem: posun rodiče posune i děti. Když v Blenderu smažeš rodiče a děti
+  necháš, v Godotu se přesunou pod nejbližšího předka.
 - `BB_Locked` — skutečná geometrie všeho ostatního ze scény: postavy, budovy,
-  terén (z Terrain3D, vrchol každých 16 m), spawnpointy, světla. Jde vybrat
+  terén (z Terrain3D, vrchol každých 16 m), spawnpointy a markery jako osy
+  velké 1 m, světla. Jde vybrat
   a zaměřit (`numpad .`), ale ne posunout — změny by se do Godotu stejně
   nepropsaly. Tráva a stromy z MultiMeshe (ProtonScatter) se nepřenáší.
 
@@ -143,10 +149,14 @@ scenes/demo_scene/zviretice_zamek_whitebox/zviretice.glb     ← ve hře
 scenes/demo_scene/zviretice_zamek_whitebox/zviretice.blend   ← zdroj
 ```
 
-Když to nesedí, zapíše se přesná cesta do `<asset>.bbsrc` vedle assetu — jeden
-řádek, cesta relativně ke kořeni repa. Vytvoří ho
-`Project ▸ Tools ▸ Blender Bridge ▸ Vybrat zdrojový .blend pro výběr…`.
-Centrální index záměrně neexistuje, byl by to zdroj merge konfliktů.
+Když to nesedí (jeden `.blend` s víc modely, zdroj jinde), zapíše se přesná
+cesta do `<asset>.bbsrc` vedle assetu — jeden řádek, cesta relativně ke
+kořeni repa. Nastavuje se v Blenderu: **Detail ▸ Vybrat zdroj…** (prohlížeč
+souborů začne vedle assetu) a **Zrušit výběr zdroje**. Totéž umí
+`Project ▸ Tools ▸ Blender Bridge ▸ Vybrat zdrojový .blend pro výběr…`
+v Godotu. Zdroj musí ležet v projektu — soubor mimo repo by ostatní neměli.
+Platí pro všechny instance assetu. Centrální index záměrně neexistuje, byl
+by to zdroj merge konfliktů.
 
 | tier | geometrie | v Blenderu |
 |---|---|---|
@@ -217,7 +227,7 @@ z Terrain3D. `bounds` slouží jako záložní krabice, když `.glb` chybí.
 ## Testy
 
 ```sh
-python tests/run_tests.py                      # všechno (135 testů), ~35 s
+python tests/run_tests.py                      # všechno (147 testů), ~35 s
 python tests/run_tests.py --only blender       # jedna sada
 python tests/run_tests.py --regen-fixtures     # přegenerovat testovací scény
 ```
@@ -245,6 +255,7 @@ tvých editor settings, a Blender běží s `--factory-startup` bez tvých addon
 | `Player` (.tscn) | gameplay instance — nesmí se označit |
 | `Building` + `Decoration` | těleso s meshem, kolizí a vnořenou instancí |
 | `Character` (`rig.glb`) | armatura — pomocné tvary kostí importéru |
+| `Character/Helmet`, `Character/Socket` | dítě modelu (výstroj) a marker na modelu |
 | `Spawn`, `Sun`, `Logic/Floating` | kontext bez meshe, Node mezi Node3D |
 | `terrain.tscn` | Terrain3D pod posunutým rodičem, kopec, krabice na vrcholu |
 | `second.tscn` | otevření neaktivní scény z kontextového menu |
@@ -265,15 +276,21 @@ tvých editor settings, a Blender běží s `--factory-startup` bez tvých addon
 | Automatické načtení, Ctrl+Z ve scéně, starý manifest po restartu | editor |
 | Vyrobit zdroj: `.blend` vedle assetu s exportem, všechny instance | blender, gui, e2e |
 | Upravit model: kontext, Ctrl+S přegeneruje `.glb`, kontext se neuloží | blender, gui |
-| `.bbsrc`, zdroj vedle assetu, poškozený zdroj | godot, blender |
+| `.bbsrc`, zdroj vedle assetu, poškozený zdroj; Vybrat / Zrušit zdroj v Blenderu | godot, blender |
+| Děti modelů: hierarchie v Blenderu, posun s rodičem, smazání rodiče | godot, blender, e2e |
 | Panel v obou režimech, zaměření pohledu, dohled na terén | gui |
 
 Netestováno na Windows (runner tam GUI sadu přeskočí).
 
 ### Co testy našly
 
-Při psaní testů a prvním ostrém použití se ukázalo jedenáct chyb, všechny
-opravené a pokryté testem:
+Při psaní testů a ostrém použití se ukázalo třináct chyb, všechny opravené
+a pokryté testem:
+
+- **Děti modelu (výstroj na `armature_f`) se do Blenderu vůbec nedostaly** —
+  manifest bral model jako celek a jeho děti ze scény neprocházel.
+- **Dítě posunuté s rodičem se v Godotu posunulo dvakrát** — lokální
+  transformace se počítala vůči staré pozici rodiče.
 
 - **Kontext exportovaný z editoru byl prázdný.** glTF export v editoru
   přeskakuje nody bez `owner`; mimo editor ne, proto to headless testy

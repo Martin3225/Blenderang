@@ -335,20 +335,47 @@ def build(scene: bpy.types.Scene, manifest_path: str) -> dict[str, int]:
     locked = _ensure_collection(scene.collection, COLL_LOCKED)
 
     counts = {"props": 0, "proxies": 0, "preview": 0}
+    models: dict[str, bpy.types.Object] = {}
     for entry in manifest["nodes"]:
         if entry.get("owner") != "blender":
             continue
         obj = _build_prop(entry, root)
         layout.objects.link(obj)
+        models[entry["path"]] = obj
         counts["props"] += 1
         if obj.get(P_TIER) == "none":
             counts["preview"] += 1
+    _parent_models(models)
+    _readable_empties(list(models.values()), 0.5)
 
     counts["proxies"] = import_context(root, manifest, locked, Matrix.Identity(4))
     scene[S_MANIFEST] = manifest_path
     scene[S_ROOT] = root
     scene[S_WARNINGS] = list(WARNINGS)
     return counts
+
+
+def _parent_models(models: dict[str, bpy.types.Object]) -> None:
+    """Model, který je v Godotu dítětem jiného modelu (výstroj na armatuře),
+    je v Blenderu jeho potomkem — posun rodiče posune i děti."""
+    for obj in models.values():
+        parent = models.get(str(obj.get(P_PARENT, "")))
+        if parent is None:
+            continue
+        world = obj.matrix_world.copy()
+        obj.parent = parent
+        obj.matrix_world = world
+
+
+def _readable_empties(objects: list[bpy.types.Object], size: float) -> None:
+    """Osy prázdných objektů velké [size] metrů ve světě, bez ohledu na
+    měřítko — glTF importér je dělá stovky metrů velké."""
+    bpy.context.view_layer.update()
+    for obj in objects:
+        if obj.type != "EMPTY":
+            continue
+        scale = max(abs(v) for v in obj.matrix_world.to_scale()) or 1.0
+        obj.empty_display_size = size / scale
 
 
 def import_context(
@@ -378,11 +405,15 @@ def import_context(
             lock(obj)
             if obj.parent is None:
                 obj.matrix_world = matrix @ obj.matrix_world
+        _readable_empties(objects, 1.0)
         return len(godot_entries)
 
+    boxes = []
     for entry in godot_entries:
         obj = _build_box(entry, matrix)
         target.objects.link(obj)
+        boxes.append(obj)
+    _readable_empties(boxes, 1.0)
     return len(godot_entries)
 
 
@@ -766,3 +797,68 @@ def describe(obj: bpy.types.Object) -> tuple[str, list[tuple[str, str]]]:
     if obj.get(P_PATH) == "context" or unit.get(P_PATH) == "context":
         return "godot", [("Node v Godotu", unit.name)]
     return "helper", []
+
+
+
+# --------------------------------------------------------- výběr zdroje
+
+
+def override_path(root: str, asset_src: str) -> str:
+    """``<asset>.bbsrc`` — přesná cesta ke zdroji, sdílená s Godotem."""
+    return asset_abs(root, asset_src) + ".bbsrc"
+
+
+def has_override(root: str, asset_src: str) -> bool:
+    return os.path.isfile(override_path(root, asset_src))
+
+
+def _models_of(scene: bpy.types.Scene, asset_src: str) -> list[bpy.types.Object]:
+    return [o for o in scene_models(scene) if o.get(P_SRC) == asset_src]
+
+
+def choose_source(scene: bpy.types.Scene, asset_src: str, blend_path: str) -> str:
+    """Nastaví existující .blend jako zdroj assetu a přepojí všechny jeho
+    instance. Cesta se uloží do ``.bbsrc`` relativně ke kořeni projektu —
+    soubor proto musí být uvnitř projektu, jinak by ho ostatní nenašli."""
+    root = scene.get(S_ROOT, "")
+    if not root:
+        raise BridgeError("scéna nemá načtený manifest")
+    if not os.path.isfile(blend_path) or not blend_path.lower().endswith(".blend"):
+        raise BridgeError("vyber existující .blend soubor")
+    relative = os.path.relpath(os.path.abspath(blend_path), root)
+    if relative.startswith(".."):
+        raise BridgeError("zdroj musí ležet v projektu (%s), jinak ho ostatní nenajdou" % root)
+    relative = relative.replace(os.sep, "/")
+
+    stem = os.path.basename(asset_src).rsplit(".", 1)[0]
+    collection = _link_library_collection(os.path.join(root, relative), stem)
+    marker = override_path(root, asset_src)
+    if relative == expected_source(asset_src):
+        if os.path.isfile(marker):
+            os.remove(marker)
+    else:
+        with open(marker, "w", encoding="utf-8") as handle:
+            handle.write(relative)
+    for obj in _models_of(scene, asset_src):
+        obj.instance_collection = collection
+        obj[P_TIER] = "library"
+        obj[P_SRC_BLEND] = relative
+    return relative
+
+
+def clear_source(scene: bpy.types.Scene, asset_src: str) -> None:
+    """Zruší ručně vybraný zdroj; platí zase konvence (.blend vedle assetu),
+    jinak náhled z .glb."""
+    root = scene.get(S_ROOT, "")
+    marker = override_path(root, asset_src)
+    if os.path.isfile(marker):
+        os.remove(marker)
+    for obj in _models_of(scene, asset_src):
+        entry = {"name": obj.name, "src": asset_src}
+        collection, relative = _resolve_source(entry, root)
+        obj.instance_collection = collection
+        obj[P_TIER] = "library" if relative else "none"
+        if relative:
+            obj[P_SRC_BLEND] = relative
+        else:
+            obj.pop(P_SRC_BLEND, None)

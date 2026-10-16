@@ -33,6 +33,7 @@ try:
     record("scéna postavena ze startovního Pythonu z Godotu", scene.get(bridge.S_MANIFEST, "").endswith("basic.json"))
 
     bpy.data.objects["Crate"].location.x += 3
+    bpy.data.objects["Character"].location.x += 2     # Helmet je potomek, jde s ním
     bpy.data.objects["InRotated"].rotation_euler.z += math.radians(45)
     copy = bpy.data.objects["Tower"].copy()
     copy.name = "TowerCopy"

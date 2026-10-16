@@ -34,7 +34,8 @@ func test_context_has_real_geometry_of_godot_nodes() -> void:
 	for name: String in ["Player", "Building", "Sphere"]:
 		var unit: Node = context.find_child(name, true, false)
 		check(unit != null and not _meshes(unit).is_empty(), "%s má mesh" % name)
-	for name: String in ["Spawn", "Sun"]:
+	check(context.find_child("Helmet", true, false) == null, "výstroj modelu je v Blenderu jako model, ne kontext")
+	for name: String in ["Spawn", "Sun", "Socket"]:
 		check(context.find_child(name, true, false) != null, "%s je v kontextu jako prázdný node" % name)
 	done()
 
