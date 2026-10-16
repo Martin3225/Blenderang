@@ -1,0 +1,17 @@
+; Testovací projekt Blender Bridge. Runner ho kopíruje do tests/.work/project
+; a doplní do něj addon z repa a Terrain3D, takže fixtures se nikdy nemění.
+
+config_version=5
+
+[application]
+
+config/name="BlenderBridgeTests"
+config/features=PackedStringArray("4.7", "Forward Plus")
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/blender_bridge/plugin.cfg", "res://addons/terrain_3d/plugin.cfg", "res://addons/bb_test_driver/plugin.cfg")
+
+[filesystem]
+
+import/blender/enabled=false

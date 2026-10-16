@@ -55,8 +55,12 @@ static func write(root: Node) -> String:
 		push_error("Blender Bridge: nelze vytvořit %s (%d)" % [PIPELINE_DIR, dir_err])
 		return ""
 	_ensure_gdignore()
-	var payload: String = JSON.stringify(export_scene(root), "\t")
+	var manifest: Dictionary = export_scene(root)
 	var path: String = manifest_path(root)
+	var context: String = BBContext.write(root, manifest, path)
+	if not context.is_empty():
+		manifest["context_glb"] = context.trim_prefix("res://")
+	var payload: String = JSON.stringify(manifest, "\t")
 	if not store(path, payload) or not store(baseline_path(root), payload):
 		return ""
 	return path
@@ -173,6 +177,9 @@ static func _proxy_entry(node: Node3D, root: Node) -> Dictionary:
 
 ## Transformace vůči kořeni scény. Počítá se ručně, aby funkce fungovala
 ## i na stromu, který není přidaný do SceneTree (headless export).
+##
+## Node s [code]top_level[/code] (např. Terrain3D) rodiče ignoruje — jeho
+## transformace už je globální.
 static func global_xform(node: Node3D, root: Node) -> Transform3D:
 	if node == null:
 		return Transform3D.IDENTITY
@@ -182,6 +189,8 @@ static func global_xform(node: Node3D, root: Node) -> Transform3D:
 		var spatial: Node3D = current as Node3D
 		if spatial != null:
 			xform = spatial.transform * xform
+			if spatial.top_level:
+				break
 		current = current.get_parent()
 	return xform
 

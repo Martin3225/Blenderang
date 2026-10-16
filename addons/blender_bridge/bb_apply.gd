@@ -115,12 +115,16 @@ func revert(ops: Array[Dictionary]) -> void:
 				op["node"].owner = op["owner"]
 
 
-## Zavěsí operace do editorové undo historie jako jedinou akci.
-static func commit(ops: Array[Dictionary], undo: EditorUndoRedoManager) -> void:
+## Zavěsí operace do undo historie scény jako jedinou akci.
+##
+## Kontext historie je kořen scény: operace se volají na pomocném objektu,
+## podle kterého by editor akci zařadil do globální historie a Ctrl+Z ve
+## scéně by ji nevrátil. Scéna se tím zároveň označí jako neuložená.
+static func commit(root: Node, ops: Array[Dictionary], undo: EditorUndoRedoManager) -> void:
 	if ops.is_empty():
 		return
 	var runner: BBApply = BBApply.new()
-	undo.create_action("Blender Bridge: import z Blenderu")
+	undo.create_action("Blender Bridge: import z Blenderu", UndoRedo.MERGE_DISABLE, root)
 	undo.add_do_method(runner, &"execute", ops)
 	undo.add_undo_method(runner, &"revert", ops)
 	undo.add_do_reference(runner)
@@ -172,8 +176,11 @@ static func _deserialize(xform: Array) -> Transform3D:
 
 
 ## Manifest nese transformaci vůči kořeni scény. Node ale drží lokální,
-## takže se musí odečíst transformace rodičovského řetězce.
+## takže se musí odečíst transformace rodičovského řetězce — kromě nodu
+## s [code]top_level[/code], jehož transformace už globální je.
 static func _to_local(node: Node3D, root: Node, world: Transform3D) -> Transform3D:
+	if node.top_level:
+		return world
 	return _to_local_under(node.get_parent(), root, world)
 
 

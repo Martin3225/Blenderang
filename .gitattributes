@@ -5,3 +5,8 @@
 *.py text eol=lf
 *.toml text eol=lf
 *.md text eol=lf
+*.glb binary
+*.fbx binary
+*.res binary
+*.blend binary
+*.tscn text eol=lf

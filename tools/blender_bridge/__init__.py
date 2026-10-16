@@ -28,8 +28,42 @@ def _report(operator: bpy.types.Operator, error: Exception) -> set[str]:
 
 def _open_scene(manifest: str) -> None:
     bpy.ops.wm.read_homefile(use_empty=True)
-    bridge.build(bpy.context.scene, manifest)
-    bpy.context.scene.name = os.path.splitext(os.path.basename(manifest))[0]
+    # Po read_homefile je nová scéna v okně; z časovače ani z handleru by
+    # bpy.context neukazoval na 3D pohled (viz bridge.ui_context).
+    with bpy.context.temp_override(**bridge.ui_context()):
+        scene = bpy.context.scene
+        bridge.build(scene, manifest)
+        scene.name = os.path.splitext(os.path.basename(manifest))[0]
+    _frame_models()
+
+
+def _frame_models() -> None:
+    """Po otevření zaměří pohled na modely a prodlouží dohled — terén má
+    kilometry a výchozí ořez pohledu je 1 km."""
+    if bpy.app.background or bpy.context.window_manager is None:
+        return
+    layout = bpy.data.collections.get(bridge.COLL_LAYOUT)
+    for window in bpy.context.window_manager.windows:
+        for area in window.screen.areas:
+            if area.type != "VIEW_3D":
+                continue
+            area.spaces.active.clip_end = max(area.spaces.active.clip_end, 20000.0)
+            region = next((r for r in area.regions if r.type == "WINDOW"), None)
+            if region is None or layout is None or not layout.objects:
+                continue
+            with bpy.context.temp_override(window=window, area=area, region=region):
+                bpy.ops.object.select_all(action="DESELECT")
+                for obj in layout.objects:
+                    obj.select_set(True)
+                bpy.ops.view3d.view_selected()
+                bpy.ops.object.select_all(action="DESELECT")
+
+
+def _target(context: bpy.types.Context, name: str) -> bpy.types.Object | None:
+    """Model z tlačítka v seznamu, jinak aktivní objekt."""
+    if name:
+        return bpy.data.objects.get(name)
+    return context.active_object
 
 
 # ----------------------------------------------------------------- scéna
@@ -89,10 +123,10 @@ class BB_OT_export_manifest(bpy.types.Operator):
 
 
 class BB_OT_rebuild(bpy.types.Operator):
-    """Zahodí neodeslané přesuny a postaví scénu znovu z manifestu"""
+    """Načte scénu znovu z posledního manifestu z Godotu; neodeslané změny zahodí"""
 
     bl_idname = "bb.rebuild"
-    bl_label = "Zahodit změny"
+    bl_label = "Znovu načíst z Godotu"
 
     def execute(self, context: bpy.types.Context) -> set[str]:
         try:
@@ -103,20 +137,21 @@ class BB_OT_rebuild(bpy.types.Operator):
 
 
 class BB_OT_promote_source(bpy.types.Operator):
-    """Z modelu naimportovaného z .glb udělá samostatný .blend vedle assetu"""
+    """Z modelu naimportovaného z .glb udělá samostatný .blend vedle assetu,
+    který jde upravovat"""
 
     bl_idname = "bb.promote_source"
     bl_label = "Vyrobit zdroj z .glb"
 
-    @classmethod
-    def poll(cls, context: bpy.types.Context) -> bool:
-        obj = context.active_object
-        return obj is not None and obj.get(bridge.P_TIER) == "none"
+    name: StringProperty(options={"HIDDEN", "SKIP_SAVE"})
 
     def execute(self, context: bpy.types.Context) -> set[str]:
+        obj = _target(context, self.name)
+        if obj is None or obj.get(bridge.P_TIER) != "none":
+            return _report(self, bridge.BridgeError("vyber model, který je jen náhled z .glb"))
         root = context.scene.get(bridge.S_ROOT, "")
         try:
-            created = bridge.promote_to_library(context.active_object, root)
+            created = bridge.promote_to_library(obj, root)
         except bridge.BridgeError as error:
             return _report(self, error)
         self.report({"INFO"}, "Zdroj vytvořen: %s" % os.path.relpath(created, root))
@@ -124,23 +159,45 @@ class BB_OT_promote_source(bpy.types.Operator):
 
 
 class BB_OT_edit_source(bpy.types.Operator):
-    """Odešle přesuny do Godotu a otevře zdrojový .blend assetu"""
+    """Odešle přesuny do Godotu a otevře zdrojový .blend modelu"""
 
     bl_idname = "bb.edit_source"
     bl_label = "Upravit model"
 
-    @classmethod
-    def poll(cls, context: bpy.types.Context) -> bool:
-        obj = context.active_object
-        return obj is not None and obj.get(bridge.P_TIER) == "library"
+    name: StringProperty(options={"HIDDEN", "SKIP_SAVE"})
 
     def execute(self, context: bpy.types.Context) -> set[str]:
+        obj = _target(context, self.name)
+        if obj is None or obj.get(bridge.P_TIER) != "library":
+            return _report(self, bridge.BridgeError("model nemá zdrojový .blend; nejdřív ho vyrob"))
         try:
-            source = bridge.begin_edit(context.scene, context.active_object)
+            source = bridge.begin_edit(context.scene, obj)
         except bridge.BridgeError as error:
             return _report(self, error)
         # Scéna se nikam neukládá, přesuny už jsou v manifestu.
         bpy.ops.wm.open_mainfile(filepath=source, load_ui=False)
+        return {"FINISHED"}
+
+
+class BB_OT_select_model(bpy.types.Operator):
+    """Vybere model a zaměří na něj pohled"""
+
+    bl_idname = "bb.select_model"
+    bl_label = "Vybrat model"
+    bl_options = {"INTERNAL"}
+
+    name: StringProperty(options={"HIDDEN", "SKIP_SAVE"})
+
+    def execute(self, context: bpy.types.Context) -> set[str]:
+        obj = bpy.data.objects.get(self.name)
+        if obj is None:
+            return {"CANCELLED"}
+        for other in context.selected_objects:
+            other.select_set(False)
+        obj.select_set(True)
+        context.view_layer.objects.active = obj
+        if context.area is not None and context.area.type == "VIEW_3D":
+            bpy.ops.view3d.view_selected()
         return {"FINISHED"}
 
 
@@ -168,39 +225,6 @@ class BB_OT_return_to_scene(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class BB_OT_setup_exporter(bpy.types.Operator):
-    """Nastaví export kolekce do .glb assetu, aby ho uložení přegenerovalo"""
-
-    bl_idname = "bb.setup_exporter"
-    bl_label = "Nastavit glTF export"
-
-    @classmethod
-    def poll(cls, context: bpy.types.Context) -> bool:
-        return bridge.edit_session() is not None
-
-    def execute(self, context: bpy.types.Context) -> set[str]:
-        try:
-            target = bridge.setup_session_exporter(bridge.edit_session())
-        except bridge.BridgeError as error:
-            return _report(self, error)
-        self.report({"INFO"}, "Export nastaven na %s" % target)
-        return {"FINISHED"}
-
-
-class BB_OT_show_sources(bpy.types.Operator):
-    """Přepne viditelnost kolekce se zdrojovou geometrií"""
-
-    bl_idname = "bb.show_sources"
-    bl_label = "Zobrazit zdroje"
-
-    def execute(self, context: bpy.types.Context) -> set[str]:
-        layer = context.view_layer.layer_collection.children.get(bridge.COLL_SOURCES)
-        if layer is None:
-            return _report(self, bridge.BridgeError("scéna nemá kolekci %s" % bridge.COLL_SOURCES))
-        layer.exclude = not layer.exclude
-        return {"FINISHED"}
-
-
 # --------------------------------------------------------------- handlery
 
 
@@ -209,12 +233,15 @@ def _on_load_post(_: object) -> None:
     session = bridge.edit_session()
     if session is None:
         return
-    collection = bpy.data.collections.get(session.get("collection", ""))
-    # libraries.write zapíše kolekci bez scény; bez tohohle by po otevření
-    # nebylo nic vidět.
-    if collection is not None and collection.name not in bpy.context.scene.collection.children:
-        bpy.context.scene.collection.children.link(collection)
-    bridge.build_context(session)
+    collection = bridge.session_collection(session)
+    if collection is not None:
+        # libraries.write zapíše kolekci bez scény; bez tohohle by po otevření
+        # nebylo nic vidět.
+        if collection.name not in bpy.context.scene.collection.children:
+            bpy.context.scene.collection.children.link(collection)
+        bridge.setup_session_exporter(session)
+    with bpy.context.temp_override(**bridge.ui_context()):
+        bridge.build_context(session)
 
 
 @persistent
@@ -227,9 +254,11 @@ def _on_save_post(_: object) -> None:
     session = bridge.edit_session()
     if session is None:
         return
-    if bridge.collection_has_exporter(session):
-        bpy.ops.wm.collection_export_all()
-    bridge.build_context(session)
+    collection = bridge.session_collection(session)
+    if collection is not None and bridge.collection_has_exporter(session):
+        bridge.export_collection(collection)
+    with bpy.context.temp_override(**bridge.ui_context()):
+        bridge.build_context(session)
 
 
 _HANDLERS = (
@@ -263,20 +292,23 @@ class BB_PT_panel(bpy.types.Panel):
         send = layout.row()
         send.scale_y = 1.6
         send.operator(BB_OT_export_manifest.bl_idname, icon="EXPORT")
-        row = layout.row(align=True)
-        row.operator(BB_OT_rebuild.bl_idname, icon="LOOP_BACK")
-        row.operator(BB_OT_show_sources.bl_idname, icon="OUTLINER")
+        layout.operator(BB_OT_rebuild.bl_idname, icon="FILE_REFRESH")
 
-        obj = context.active_object
-        if obj is None or bridge.P_ID not in obj:
-            return
         box = layout.box()
-        box.label(text=obj.name, icon="OBJECT_DATA")
-        if obj.get(bridge.P_TIER) == "library":
-            box.operator(BB_OT_edit_source.bl_idname, icon="EDITMODE_HLT")
-        else:
-            box.label(text="Jen náhled z .glb, úpravy se neuloží.", icon="INFO")
-            box.operator(BB_OT_promote_source.bl_idname, icon="FILE_NEW")
+        box.label(text="Modely", icon="OUTLINER_COLLECTION")
+        for obj in bridge.scene_models(context.scene):
+            row = box.row(align=True)
+            pick = row.operator(
+                BB_OT_select_model.bl_idname, text=obj.name, emboss=obj == context.active_object,
+                icon="LINKED" if obj.get(bridge.P_TIER) == "library" else "FILE_3D",
+            )
+            pick.name = obj.name
+            if obj.get(bridge.P_TIER) == "library":
+                row.operator(BB_OT_edit_source.bl_idname, text="Upravit", icon="EDITMODE_HLT").name = obj.name
+            else:
+                row.operator(BB_OT_promote_source.bl_idname, text="Vyrobit zdroj", icon="FILE_NEW").name = obj.name
+        if any(o.get(bridge.P_TIER) != "library" for o in bridge.scene_models(context.scene)):
+            box.label(text="Bez zdroje je model jen náhled z .glb.", icon="INFO")
 
     def _draw_edit(self, session: dict) -> None:
         layout = self.layout
@@ -284,10 +316,7 @@ class BB_PT_panel(bpy.types.Panel):
         back = layout.row()
         back.scale_y = 1.6
         back.operator(BB_OT_return_to_scene.bl_idname, icon="LOOP_BACK")
-        if bridge.collection_has_exporter(session):
-            layout.label(text="Ctrl+S přegeneruje .glb", icon="CHECKMARK")
-        else:
-            layout.operator(BB_OT_setup_exporter.bl_idname, icon="EXPORT")
+        layout.label(text="Ctrl+S uloží model a přegeneruje .glb", icon="CHECKMARK")
 
 
 _CLASSES = (
@@ -297,9 +326,8 @@ _CLASSES = (
     BB_OT_rebuild,
     BB_OT_promote_source,
     BB_OT_edit_source,
+    BB_OT_select_model,
     BB_OT_return_to_scene,
-    BB_OT_setup_exporter,
-    BB_OT_show_sources,
     BB_PT_panel,
 )
 

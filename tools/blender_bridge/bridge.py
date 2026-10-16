@@ -31,7 +31,6 @@ S_ROOT = "bb_project_root"
 
 COLL_LAYOUT = "BB_Layout"
 COLL_LOCKED = "BB_Locked"
-COLL_SOURCES = "BB_Sources"
 
 # Godot: X vpravo, Y nahoru, -Z dopředu. Blender: X vpravo, Y dopředu, Z nahoru.
 # Převod báze mezi soustavami; matice je ortogonální, takže inverze == transpozice.
@@ -106,6 +105,31 @@ def stored_manifest_path(scene: bpy.types.Scene) -> str:
     return path
 
 
+# ------------------------------------------------------------------ kontext
+
+
+def ui_context() -> dict[str, Any]:
+    """Kontext 3D pohledu pro ``temp_override``.
+
+    Godot spouští stavbu scény z časovače a handlery běží po načtení
+    souboru; ani jedno nemá okno ani 3D pohled. glTF importér si ale u modelů
+    s armaturou sahá na ``bpy.context.object`` a bez 3D pohledu spadne.
+    Na pozadí (testy, ``--background``) se nic nepřebíjí.
+    """
+    manager = bpy.context.window_manager
+    if bpy.app.background or manager is None or not manager.windows:
+        return {}
+    for window in manager.windows:
+        for area in window.screen.areas:
+            if area.type != "VIEW_3D":
+                continue
+            region = next((r for r in area.regions if r.type == "WINDOW"), None)
+            return {"window": window, "screen": window.screen, "area": area, "region": region,
+                    "scene": window.scene, "view_layer": window.view_layer}
+    window = manager.windows[0]
+    return {"window": window, "screen": window.screen, "scene": window.scene, "view_layer": window.view_layer}
+
+
 # ------------------------------------------------------------------- kolekce
 
 
@@ -145,68 +169,88 @@ def _link_library_collection(blend_path: str, name: str) -> bpy.types.Collection
     return linked
 
 
-def _import_asset(asset_abs: str, target: bpy.types.Collection) -> bool:
-    """Naimportuje .glb/.gltf/.fbx do kolekce. Slouží jako náhled assetu,
-    který ještě nemá zdrojový .blend, a jako základ při výrobě zdroje."""
-    if not os.path.isfile(asset_abs):
-        return False
-    extension = os.path.splitext(asset_abs)[1].lower()
+# glTF importér si pro tvary kostí armatury zakládá pomocné objekty
+# v kolekci „glTF_not_exported“. Patří jen kostem, ne do scény.
+_IMPORTER_HELPERS = "glTF_not_exported"
+
+
+def _import_file(path: str) -> tuple[list[bpy.types.Object], list[bpy.types.Object]]:
+    """Naimportuje .glb/.gltf/.fbx a vrátí (objekty, pomocné objekty importéru).
+
+    Všechny nové objekty odpojí ze scény — volající rozhodne, kam patří.
+    Kolekce, které si importér založil, po sobě uklidí.
+    """
+    extension = os.path.splitext(path)[1].lower()
     objects_before = set(bpy.data.objects)
     collections_before = set(bpy.data.collections)
     if extension in (".glb", ".gltf"):
-        bpy.ops.import_scene.gltf(filepath=asset_abs)
+        bpy.ops.import_scene.gltf(filepath=path)
     elif extension == ".fbx":
-        bpy.ops.import_scene.fbx(filepath=asset_abs)
+        bpy.ops.import_scene.fbx(filepath=path)
     else:
-        return False
+        raise BridgeError("nepodporovaný formát %s" % path)
+    objects: list[bpy.types.Object] = []
+    helpers: list[bpy.types.Object] = []
     for obj in set(bpy.data.objects) - objects_before:
+        is_helper = any(c.name.startswith(_IMPORTER_HELPERS) for c in obj.users_collection)
         for collection in list(obj.users_collection):
             collection.objects.unlink(obj)
-        target.objects.link(obj)
-    # Importér si zakládá pomocné kolekce (glTF_not_exported); po přesunu
-    # objektů zůstanou prázdné a jen by zaplevelily outliner.
+        (helpers if is_helper else objects).append(obj)
     for collection in set(bpy.data.collections) - collections_before:
-        if collection is not target and not collection.all_objects:
-            bpy.data.collections.remove(collection)
-    return True
+        bpy.data.collections.remove(collection)
+    return objects, helpers
 
 
-def _local_collection(stem: str, sources: bpy.types.Collection) -> bpy.types.Collection:
-    collection = bpy.data.collections.get(stem)
-    if collection is None:
-        collection = bpy.data.collections.new(stem)
-        sources.children.link(collection)
+def _preview_collection(entry: dict[str, Any], root: str) -> bpy.types.Collection | None:
+    """Kolekce s modelem naimportovaným z .glb pro asset bez zdrojového .blend.
+
+    Kolekce není ve scéně — instance ji ve scéně mít nepotřebuje. Model je
+    tak vidět jen jednou, na místě instance, a nikde se neválí v počátku.
+    """
+    stem = os.path.basename(entry.get("src", "")).rsplit(".", 1)[0]
+    existing = bpy.data.collections.get(stem)
+    if existing is not None and existing.get(P_PREVIEW):
+        return existing
+    path = asset_abs(root, entry.get("src", ""))
+    if not os.path.isfile(path):
+        return None
+    objects, _ = _import_file(path)
+    collection = bpy.data.collections.new(stem)
+    collection[P_PREVIEW] = True
+    for obj in objects:
+        collection.objects.link(obj)
     return collection
 
 
-def _resolve_source(
-    entry: dict[str, Any],
-    root: str,
-    sources: bpy.types.Collection,
-) -> bpy.types.Collection | None:
-    """Kolekce, kterou bude instance ukazovat.
+def source_of(entry: dict[str, Any], root: str) -> str:
+    """Relativní cesta ke zdrojovému .blend, nebo prázdno.
 
-    Asset bez zdrojového .blend není prázdná osa — naimportuje se přímo
-    z .glb, takže je vidět a dá se z něj jedním tlačítkem vyrobit zdroj.
+    Stejné pravidlo jako BBPaths v Godotu: přesná cesta v ``<asset>.bbsrc``,
+    jinak ``.blend`` vedle assetu. Blender ho vyhodnocuje sám, aby nově
+    vyrobený zdroj viděl hned, ne až po dalším exportu z Godotu.
     """
-    tier = entry.get("tier", "none")
-    stem = os.path.basename(entry.get("src", "")).rsplit(".", 1)[0]
-    if tier == "library":
-        blend_path = os.path.join(root, entry["src_blend"])
-        if not os.path.isfile(blend_path):
-            return None
-        return _link_library_collection(blend_path, stem)
+    asset = entry.get("src", "")
+    override = asset_abs(root, asset) + ".bbsrc"
+    if os.path.isfile(override):
+        with open(override, encoding="utf-8") as handle:
+            relative = handle.read().strip().replace("res://", "", 1)
+    else:
+        relative = expected_source(asset)
+    return relative if os.path.isfile(os.path.join(root, relative)) else ""
 
-    existing = bpy.data.collections.get(stem)
-    if existing is not None:
-        return existing
-    preview = _local_collection(stem, sources)
-    asset_abs = os.path.join(root, entry.get("src", "").replace("res://", "", 1))
-    if not _import_asset(asset_abs, preview):
-        bpy.data.collections.remove(preview)
-        return None
-    preview[P_PREVIEW] = True
-    return preview
+
+def _resolve_source(entry: dict[str, Any], root: str) -> tuple[bpy.types.Collection | None, str]:
+    """Kolekce, kterou bude instance ukazovat (nalinkovaný zdroj, nebo náhled)
+    a relativní cesta ke zdroji, pokud existuje."""
+    relative = source_of(entry, root)
+    if relative:
+        stem = os.path.basename(entry.get("src", "")).rsplit(".", 1)[0]
+        try:
+            return _link_library_collection(os.path.join(root, relative), stem), relative
+        except (OSError, BridgeError) as error:
+            # Poškozený nebo prázdný .blend nesmí shodit otevření celé scény.
+            print("Blender Bridge: zdroj %s nejde načíst (%s), použije se náhled z .glb" % (relative, error))
+    return _preview_collection(entry, root), ""
 
 
 # -------------------------------------------------------------------- stavba
@@ -242,53 +286,73 @@ def _make_proxy_mesh(name: str, bounds: dict[str, Any]) -> bpy.types.Mesh:
     return mesh
 
 
+def lock(obj: bpy.types.Object) -> None:
+    """Kontext z Godotu jde vybrat a zaměřit (numpad .), ale ne posunout.
+    Změny by se stejně do Godotu nepropsaly."""
+    obj.lock_location = (True, True, True)
+    obj.lock_rotation = (True, True, True)
+    obj.lock_rotation_w = True
+    obj.lock_scale = (True, True, True)
+
+
 def build(scene: bpy.types.Scene, manifest_path: str) -> dict[str, int]:
-    """Postaví layout z manifestu. Existující BB objekty nahradí."""
+    """Postaví scénu z manifestu. Existující BB objekty nahradí."""
     manifest = load_manifest(manifest_path)
     root = project_root_for(manifest_path)
 
     _clear_previous(scene)
     layout = _ensure_collection(scene.collection, COLL_LAYOUT)
     locked = _ensure_collection(scene.collection, COLL_LOCKED)
-    sources = _ensure_collection(scene.collection, COLL_SOURCES)
-    locked.hide_select = True
 
     counts = {"props": 0, "proxies": 0, "preview": 0}
     for entry in manifest["nodes"]:
-        if entry.get("owner") == "blender":
-            obj = _build_prop(entry, root, sources)
-            layout.objects.link(obj)
-            counts["props"] += 1
-            if entry.get("tier", "none") == "none":
-                counts["preview"] += 1
-        else:
-            obj = _build_proxy(entry)
-            locked.objects.link(obj)
-            counts["proxies"] += 1
+        if entry.get("owner") != "blender":
+            continue
+        obj = _build_prop(entry, root)
+        layout.objects.link(obj)
+        counts["props"] += 1
+        if obj.get(P_TIER) == "none":
+            counts["preview"] += 1
 
-    _exclude(scene, COLL_SOURCES, True)
+    counts["proxies"] = import_context(root, manifest, locked, Matrix.Identity(4))
     scene[S_MANIFEST] = manifest_path
     scene[S_ROOT] = root
     return counts
 
 
-def _exclude(scene: bpy.types.Scene, name: str, value: bool) -> None:
-    """Vyřadí kolekci z view layeru, aby zdroje nezaplevelily layout.
+def import_context(
+    root: str,
+    manifest: dict[str, Any],
+    target: bpy.types.Collection,
+    matrix: Matrix,
+) -> int:
+    """Zamčené okolí z Godotu do kolekce [target].
 
-    Instance se vykreslují dál — vyřazení z view layeru je neovlivní.
+    Skutečná geometrie z ``.context.glb``; starší manifest bez něj dostane
+    obálky z ``bounds``. [matrix] posune celý kontext — při úpravě modelu
+    do jeho lokálního prostoru. Vrací počet nodů z Godotu.
     """
-    for window in bpy.data.window_managers[0].windows:
-        layer = window.view_layer.layer_collection.children.get(name)
-        if layer is not None:
-            layer.exclude = value
-    layer = bpy.context.view_layer.layer_collection.children.get(name)
-    if layer is not None:
-        layer.exclude = value
+    context_path = os.path.join(root, manifest.get("context_glb", ""))
+    godot_entries = [e for e in manifest["nodes"] if e.get("owner") != "blender"]
+    if manifest.get("context_glb") and os.path.isfile(context_path):
+        objects, _ = _import_file(context_path)
+        for obj in objects:
+            target.objects.link(obj)
+            obj[P_PATH] = "context"
+            lock(obj)
+            if obj.parent is None:
+                obj.matrix_world = matrix @ obj.matrix_world
+        return len(godot_entries)
+
+    for entry in godot_entries:
+        obj = _build_box(entry, matrix)
+        target.objects.link(obj)
+    return len(godot_entries)
 
 
-def _build_prop(entry: dict[str, Any], root: str, sources: bpy.types.Collection) -> bpy.types.Object:
+def _build_prop(entry: dict[str, Any], root: str) -> bpy.types.Object:
     obj = bpy.data.objects.new(entry["name"], None)
-    collection = _resolve_source(entry, root, sources)
+    collection, relative = _resolve_source(entry, root)
     if collection is not None:
         obj.instance_type = "COLLECTION"
         obj.instance_collection = collection
@@ -297,15 +361,15 @@ def _build_prop(entry: dict[str, Any], root: str, sources: bpy.types.Collection)
     obj[P_ID] = entry["bb_id"]
     obj[P_PATH] = entry["path"]
     obj[P_SRC] = entry["src"]
-    obj[P_TIER] = entry.get("tier", "none")
     obj[P_PARENT] = entry.get("parent", ".")
-    if entry.get("src_blend"):
-        obj[P_SRC_BLEND] = entry["src_blend"]
+    obj[P_TIER] = "library" if relative else "none"
+    if relative:
+        obj[P_SRC_BLEND] = relative
     obj.matrix_world = godot_to_blender(entry["xform"])
     return obj
 
 
-def _build_proxy(entry: dict[str, Any]) -> bpy.types.Object:
+def _build_box(entry: dict[str, Any], matrix: Matrix) -> bpy.types.Object:
     bounds = entry.get("bounds")
     if bounds is None:
         obj = bpy.data.objects.new(entry["name"], None)
@@ -313,9 +377,9 @@ def _build_proxy(entry: dict[str, Any]) -> bpy.types.Object:
     else:
         obj = bpy.data.objects.new(entry["name"], _make_proxy_mesh(entry["name"], bounds))
     obj.display_type = "WIRE"
-    obj.hide_select = True
-    obj[P_PATH] = entry["path"]
-    obj.matrix_world = godot_to_blender(entry["xform"])
+    obj[P_PATH] = entry.get("path", "context")
+    obj.matrix_world = matrix @ godot_to_blender(entry["xform"])
+    lock(obj)
     return obj
 
 
@@ -340,6 +404,9 @@ def export(scene: bpy.types.Scene) -> dict[str, int]:
     """
     manifest_path = stored_manifest_path(scene)
     manifest = load_manifest(manifest_path)
+    # matrix_world se po změně location přepočítá až s depsgraphem; ze
+    # skriptu nebo hned po úpravě by jinak šla ven stará pozice.
+    bpy.context.view_layer.update()
     originals = {
         entry["bb_id"]: entry
         for entry in manifest["nodes"]
@@ -352,7 +419,7 @@ def export(scene: bpy.types.Scene) -> dict[str, int]:
     counts = {"kept": 0, "moved": 0, "added": 0, "removed": 0, "pinned": 0}
     taken: set[str] = set()
 
-    for obj in sorted(_layout_objects(scene), key=lambda item: item.name):
+    for obj in scene_models(scene):
         entry, is_new = _entry_for(obj, originals, taken)
         if entry is None:
             continue
@@ -378,8 +445,9 @@ def export(scene: bpy.types.Scene) -> dict[str, int]:
     return counts
 
 
-def _layout_objects(scene: bpy.types.Scene) -> list[bpy.types.Object]:
-    return [obj for obj in scene.objects if P_ID in obj]
+def scene_models(scene: bpy.types.Scene) -> list[bpy.types.Object]:
+    """Modely, které jdou do Godotu, seřazené podle jména (pro panel i export)."""
+    return sorted((obj for obj in scene.objects if P_ID in obj), key=lambda obj: obj.name)
 
 
 def _entry_for(
@@ -431,14 +499,27 @@ def asset_abs(root: str, asset_src: str) -> str:
 
 
 def ensure_exporter(collection: bpy.types.Collection, target: str) -> None:
-    """Collection Exporter na glTF do cesty assetu. Uložení zdroje pak
-    regeneruje .glb a Godot ho reimportuje."""
-    for exporter in collection.exporters:
-        if _same_file(bpy.path.abspath(exporter.export_properties.filepath), target):
-            return
+    """Collection Exporter na glTF do cesty assetu.
+
+    Cesta se nastavuje vždy znovu: ``bpy.data.libraries.write`` ji do nového
+    souboru neuloží a prázdná cesta by exportovala jinam (podle jména kolekce).
+    """
+    exporter = next((e for e in collection.exporters if e.name.lower().startswith("gltf")), None)
+    if exporter is None and len(collection.exporters):
+        exporter = collection.exporters[0]
+    if exporter is None:
+        with bpy.context.temp_override(collection=collection):
+            bpy.ops.collection.exporter_add(name="IO_FH_gltf2")
+        exporter = collection.exporters[-1]
+    exporter.filepath = target
+    exporter.export_properties.filepath = target
+
+
+def export_collection(collection: bpy.types.Collection) -> None:
+    """Vyexportuje kolekci jejím exporterem. ``wm.collection_export_all``
+    nestačí — exportuje jen kolekce, které jsou ve view layeru."""
     with bpy.context.temp_override(collection=collection):
-        bpy.ops.collection.exporter_add(name="IO_FH_gltf2")
-    collection.exporters[-1].export_properties.filepath = target
+        bpy.ops.collection.export_all()
 
 
 def promote_to_library(obj: bpy.types.Object, root: str) -> str:
@@ -463,14 +544,19 @@ def promote_to_library(obj: bpy.types.Object, root: str) -> str:
     ensure_exporter(collection, asset_abs(root, asset_src))
     bpy.data.libraries.write(target, {collection}, fake_user=True)
 
+    # Stejný asset může mít ve scéně víc instancí; všechny se přepojí.
+    instances = [o for o in bpy.data.objects if o.instance_collection == collection]
     name = collection.name
-    for child in list(collection.objects):
+    for child in list(collection.all_objects):
         bpy.data.objects.remove(child, do_unlink=True)
     bpy.data.collections.remove(collection)
 
-    obj.instance_collection = _link_library_collection(target, name)
-    obj[P_TIER] = "library"
-    obj[P_SRC_BLEND] = os.path.relpath(target, root).replace(os.sep, "/")
+    linked = _link_library_collection(target, name)
+    relative = os.path.relpath(target, root).replace(os.sep, "/")
+    for instance in instances:
+        instance.instance_collection = linked
+        instance[P_TIER] = "library"
+        instance[P_SRC_BLEND] = relative
     return target
 
 
@@ -542,48 +628,70 @@ def end_edit(session: dict[str, Any]) -> str:
 
 
 def build_context(session: dict[str, Any]) -> int:
-    """Postaví zamčené obálky okolí kolem upravovaného assetu."""
+    """Postaví zamčené okolí kolem upravovaného modelu.
+
+    Godot část je skutečná geometrie z ``.context.glb``, ostatní modely
+    jsou instance jejich náhledů. Další výskyty téhož assetu ukazují přímo
+    na upravovanou kolekci, takže úpravy jsou vidět na všech místech naráz.
+    Všechno je posunuté do prostoru modelu, jako by stál na svém místě.
+    """
     clear_context()
     manifest = load_manifest(session["manifest"])
-    focus = next(
-        (e for e in manifest["nodes"] if e.get("bb_id") == session["bb_id"]),
-        None,
-    )
+    focus = next((e for e in manifest["nodes"] if e.get("bb_id") == session["bb_id"]), None)
     if focus is None:
         return 0
+    root = session["root"]
     to_local = godot_to_blender(focus["xform"]).inverted()
+    edited = bpy.data.collections.get(session.get("collection", ""))
 
     context = bpy.data.collections.new(COLL_CONTEXT)
     bpy.context.scene.collection.children.link(context)
-    context.hide_select = True
-    built = 0
+    built = import_context(root, manifest, context, to_local)
     for entry in manifest["nodes"]:
-        if entry is focus or "bounds" not in entry:
+        if entry.get("owner") != "blender" or entry is focus:
             continue
-        obj = bpy.data.objects.new(entry["name"], _make_proxy_mesh(entry["name"], entry["bounds"]))
-        obj.display_type = "WIRE"
-        obj.hide_select = True
-        obj.matrix_world = to_local @ godot_to_blender(entry["xform"])
+        if entry.get("src") == session.get("asset") and edited is not None:
+            source = edited
+        else:
+            source = _preview_collection(entry, root)
+        if source is None:
+            obj = _build_box(entry, to_local)
+        else:
+            obj = bpy.data.objects.new(entry["name"], None)
+            obj.instance_type = "COLLECTION"
+            obj.instance_collection = source
+            obj.matrix_world = to_local @ godot_to_blender(entry["xform"])
+            lock(obj)
         context.objects.link(obj)
         built += 1
     return built
 
 
 def clear_context() -> None:
+    """Odebere kontext včetně všeho, co kvůli němu vzniklo (náhledy, meshe,
+    materiály). Volá se před každým uložením — do zdroje se nic nedostane."""
     context = bpy.data.collections.get(COLL_CONTEXT)
     if context is None:
         return
-    for obj in list(context.objects):
-        mesh = obj.data
+    for obj in list(context.all_objects):
         bpy.data.objects.remove(obj, do_unlink=True)
-        if mesh is not None and mesh.users == 0:
-            bpy.data.meshes.remove(mesh)
     bpy.data.collections.remove(context)
+    for collection in [c for c in bpy.data.collections if c.get(P_PREVIEW)]:
+        for obj in list(collection.all_objects):
+            bpy.data.objects.remove(obj, do_unlink=True)
+        bpy.data.collections.remove(collection)
+    # Data bez uživatelů by se stejně neuložila; purge je jen uklidí z paměti,
+    # aby se při dalším uložení nehromadila. Fake user se nemaže.
+    bpy.data.orphans_purge(do_local_ids=True, do_linked_ids=True, do_recursive=True)
+
+
+def session_collection(session: dict[str, Any]) -> bpy.types.Collection | None:
+    return bpy.data.collections.get(session.get("collection", ""))
 
 
 def collection_has_exporter(session: dict[str, Any]) -> bool:
-    collection = bpy.data.collections.get(session.get("collection", ""))
-    return collection is not None and len(collection.exporters) > 0
+    collection = session_collection(session)
+    return collection is not None and any(e.filepath for e in collection.exporters)
 
 
 def setup_session_exporter(session: dict[str, Any]) -> str:

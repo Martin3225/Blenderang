@@ -88,20 +88,30 @@ manifest a spustí Blender, který si scénu postaví bez dalšího klikání.
 
 **Blender → Godot:** velké tlačítko **Odeslat do Godotu** v `N ▸ Bridge`.
 Godot si změnu všimne do sekundy a načte ji do otevřené scény jako jednu undo
-akci — `Ctrl+Z` ji vrátí.
+akci — `Ctrl+Z` ve scéně ji vrátí.
 
 Scéna v Blenderu **nemá vlastní `.blend` a nic se neukládá**. Pravdou
 o rozmístění je vždycky `.tscn`; Blender je jen editor nad ní a pokaždé se
 postaví znovu z manifestu. Nemůže se tak rozejít s Godotem a `git pull` nic
-nerozbije. **Zahodit změny** postaví scénu znovu z posledního odeslaného stavu.
+nerozbije.
 
-V Blenderu vidíš:
+Panel `N ▸ Bridge`:
 
-- `BB_Layout` — objekty, se kterými můžeš hýbat, duplikovat (`Shift+D`) a mazat.
-- `BB_Locked` — drátěné krabice pro všechno ostatní ze scény: hráč, terén,
-  světla, spawnpointy. Nejdou vybrat; jsou tu kvůli kontextu.
-- `BB_Sources` — geometrie, na kterou instance ukazují. Skrytá; zobrazí se
-  tlačítkem **Zobrazit zdroje**.
+- **Odeslat do Godotu**
+- **Znovu načíst z Godotu** — postaví scénu z posledního manifestu (zahodí
+  neodeslané změny); hodí se i po změnách v Godotu.
+- **Modely** — seznam všech modelů scény. Klik na jméno model vybere a zaměří.
+  Vedle je **Upravit** (model má zdrojový `.blend`), nebo **Vyrobit zdroj**
+  (model je zatím jen náhled z `.glb`).
+
+V outlineru:
+
+- `BB_Layout` — modely, se kterými můžeš hýbat, otáčet je, duplikovat
+  (`Shift+D`) a mazat. Každý je vidět jednou, na svém místě.
+- `BB_Locked` — skutečná geometrie všeho ostatního ze scény: postavy, budovy,
+  terén (z Terrain3D, vrchol každých 16 m), spawnpointy, světla. Jde vybrat
+  a zaměřit (`numpad .`), ale ne posunout — změny by se do Godotu stejně
+  nepropsaly. Tráva a stromy z MultiMeshe (ProtonScatter) se nepřenáší.
 
 Objekty bez `bb_id` se do Godotu neposílají — pomocná geometrie ve hře
 neskončí. Protože se scéna neukládá, při dalším otevření z Godotu zmizí.
@@ -139,29 +149,28 @@ Centrální index záměrně neexistuje, byl by to zdroj merge konfliktů.
 
 ### Z náhledu upravitelný model
 
-**Vyrobit zdroj z .glb** zapíše kolekci do nového `.blend` vedle assetu
-i s nastaveným exportem do `.glb` a hned ho nalinkuje zpátky. Tier `library`.
-Převod přes `.glb` zachová meshe, UV a základní materiály, ne shader node
-setupy ani modifikátory — dělá se jednou.
+**Vyrobit zdroj** zapíše model do nového `.blend` vedle assetu i s nastaveným
+exportem do `.glb` a hned ho nalinkuje zpátky — u všech instancí téhož assetu.
+Převod přes `.glb` zachová meshe, UV, armaturu a základní materiály, ne shader
+node setupy ani modifikátory — dělá se jednou. Existující `.blend` se nikdy
+nepřepíše.
 
 ### Úprava modelu
 
-**Upravit model** na vybraném objektu:
+**Upravit** u modelu:
 
 1. odešle rozpracované přesuny do Godotu, ať se nic neztratí,
-2. otevře zdrojový `.blend` assetu,
-3. kolem modelu postaví **zamčený kontext ze scény** (`BB_Context`) — obálky
-   terénu, hráče, ostatních modelů — posunutý tak, jako by model stál na
-   svém místě ve scéně.
+2. otevře zdrojový `.blend` modelu,
+3. kolem modelu postaví **zamčený kontext ze scény** (`BB_Context`) —
+   skutečnou geometrii z Godotu i ostatní modely — posunutý tak, jako by
+   model stál na svém místě ve scéně. Další výskyty téhož modelu ukazují na
+   upravovanou kolekci, takže úpravy jsou vidět na všech místech naráz.
 
 `Ctrl+S` model uloží **a přegeneruje `.glb`**; Godot ho sám reimportuje.
 Kontext se před každým uložením odebere a po něm vrátí, do zdrojového souboru
 se nikdy nezapíše.
 
 **Uložit a zpět do scény** postaví scénu znovu z manifestu, už s novým modelem.
-
-Pokud zdroj vznikl ručně a nemá nastavený export, panel místo potvrzení
-„Ctrl+S přegeneruje .glb“ nabídne **Nastavit glTF export**.
 
 ---
 
@@ -174,7 +183,7 @@ Pokud zdroj vznikl ručně a nemá nastavený export, panel místo potvrzení
 {
   "format": 1,
   "coord_system": "godot_y_up",
-  "scene": "res://scenes/demo_scene.tscn",
+  "context_glb": ".pipeline/demo_scene.context.glb",
   "nodes": [
     { "bb_id": "4a7f…", "owner": "blender", "name": "Zviretice",
       "path": "NavigationRegion3D/Zviretice", "parent": "NavigationRegion3D",
@@ -190,47 +199,92 @@ Pokud zdroj vznikl ručně a nemá nastavený export, panel místo potvrzení
 ```
 
 `xform` je world transform vůči kořeni scény (tři sloupce báze, pak origin)
-v Godot osách. Převod do Blenderu (Z nahoru) dělá výhradně addon. Import zpět
-přepočítá na lokální transformaci pod rodičem. `bounds` je obálka v lokálním
-prostoru nodu — z ní se staví zamčené krabice i kontext při úpravě modelu.
+v Godot osách; node s `top_level` (Terrain3D) rodiče ignoruje. Převod do
+Blenderu (Z nahoru) dělá výhradně addon. Import zpět přepočítá na lokální
+transformaci pod rodičem.
+
+`.context.glb` je skutečná geometrie všeho, co vlastní Godot, a terén upečený
+z Terrain3D. `bounds` slouží jako záložní krabice, když `.glb` chybí.
 
 ---
 
-## Testováno
+## Testy
 
-Na reálné scéně (Terrain3D, ProtonScatter, 28 nodů), Godot 4.7.2 a Blender 5.2.
+```sh
+python tests/run_tests.py                      # všechno, ~35 s
+python tests/run_tests.py --only blender       # jedna sada
+python tests/run_tests.py --regen-fixtures     # přegenerovat testovací scény
+```
 
-**Godot → Blender jedním klikem.** Přesně ten Python, který plugin předává
-Blenderu, spuštěný v Blenderu 5.2: scéna se pojmenuje podle manifestu, startup
-kostka zmizí, scéna má 3 assety a 14 zamčených proxy, importér po sobě
-nenechá prázdné kolekce. Editor se načte s tlačítkem v liště a kontextovými
-menu bez chyb.
+Potřeba: Python 3, Godot 4.7 a Blender 5.2 (na PATH, v `$GODOT`/`$BLENDER`,
+nebo `--godot`/`--blender`; flatpak a Steam se najdou samy). Terrain3D si
+runner stáhne (zafixovaná verze 1.0.2) do `tests/.cache`. Pro GUI sadu na
+Linuxu `Xvfb`.
 
-**Blender → Godot automaticky.** Živý Godot editor se scénou otevřenou,
-manifest změněný zvenku: plugin do sekundy vypsal
-`z Blenderu přesunuto 1 … (Ctrl+Z vrátí)`. Manifest z dřívějška se při
-startu editoru naslepo nenačetl.
+Všechno běží v `tests/.work`: testovací projekt se zkopíruje a addon se do něj
+doplní z repa. Godot dostane vlastní konfigurační adresář, takže se nedotkne
+tvých editor settings, a Blender běží s `--factory-startup` bez tvých addonů.
+**Tvého herního projektu se testy nedotknou.**
 
-**Výroba zdroje.** Scéna se postaví bez souboru, `zviretice.glb` se
-naimportuje jako náhled, *Vyrobit zdroj z .glb* zapíše `.blend` vedle assetu
-i s exportem a nalinkuje ho. **8/8.**
+### Testovací scény
 
-**Úprava modelu s kontextem.** *Upravit model* nejdřív odešle posun o 2 m do
-manifestu, otevře zdroj, kolekce modelu je ve scéně, kontext má 16 zamčených
-obálek a hráč v něm stojí ~4 m od modelu (ne stovky metrů — přepočet do
-prostoru modelu sedí). `Ctrl+S` přegeneruje `.glb`, kontext se po uložení
-vrátí a **do uloženého souboru se nedostal**. *Uložit a zpět do scény* vrátí
-scénu bez souboru, posun přežil, marker je uklizený. **17/17.**
+`tests/godot/fixtures/` generuje `fixtures/generate.gd` (scény) a
+`tests/fixtures/make_assets.py` (assety). Pokrývají:
 
-**Round-trip.** Bez úprav nic nemění a Godot-owned položky zůstanou bajt po
-bajtu stejné, duplikace dostane nové id, smazání se propíše, *Zahodit změny*
-postaví scénu znovu. **5/5.**
+| fixture | co testuje |
+|---|---|
+| `Props/Crate`, `Tower`, `Barrel` (.fbx) | art instance v kontejneru, glTF i FBX |
+| `Rotated/InRotated` | rodič otočený o 90° a zvětšený 2× |
+| `Rotated/Detached` | `top_level` pod transformovaným rodičem |
+| `Player` (.tscn) | gameplay instance — nesmí se označit |
+| `Building` + `Decoration` | těleso s meshem, kolizí a vnořenou instancí |
+| `Character` (`rig.glb`) | armatura — pomocné tvary kostí importéru |
+| `Spawn`, `Sun`, `Logic/Floating` | kontext bez meshe, Node mezi Node3D |
+| `terrain.tscn` | Terrain3D pod posunutým rodičem, kopec, krabice na vrcholu |
+| `second.tscn` | otevření neaktivní scény z kontextového menu |
 
-**Import do scény.** Přesun se zapíše jako lokální transformace pod
-`NavigationRegion3D`, nový node vznikne pod správným rodičem, smazaný zmizí,
-undo vrátí vše. **5/5.**
+### Use casy a sady
 
-Netestováno klikáním v GUI obou programů a na Windows.
+| use case | sada |
+|---|---|
+| První otevření: označení, uložení scény, manifest, kontext, spuštění Blenderu | editor, godot |
+| Tlačítko v liště, kontextové menu tabu i FileSystemu | editor |
+| Blender postaví scénu ze startovního Pythonu (i v okně z časovače) | gui, e2e |
+| Model je vidět jednou, na místě z Godotu (rotace, měřítko, `top_level`) | blender |
+| Skutečná geometrie kontextu, terén, zamčená ale vybratelná | blender, godot |
+| Posun, rotace, měřítko → správná lokální transformace v Godotu | blender, godot, e2e |
+| Duplikace → nová instance s vlastním id pod správným rodičem | blender, godot, e2e |
+| Smazání; pomocné objekty bez `bb_id` se neposílají | blender, godot, e2e |
+| `bb_pinned` v Godotu; gameplay nody se nemění | blender, godot, e2e |
+| Automatické načtení, Ctrl+Z ve scéně, starý manifest po restartu | editor |
+| Vyrobit zdroj: `.blend` vedle assetu s exportem, všechny instance | blender, gui, e2e |
+| Upravit model: kontext, Ctrl+S přegeneruje `.glb`, kontext se neuloží | blender, gui |
+| `.bbsrc`, zdroj vedle assetu, poškozený zdroj | godot, blender |
+| Panel v obou režimech, zaměření pohledu, dohled na terén | gui |
+
+Netestováno na Windows (runner tam GUI sadu přeskočí).
+
+### Co testy našly
+
+Při psaní testů se ukázalo devět chyb, všechny opravené:
+
+- **Blender v okně spadl při stavbě scény s armaturou.** Startovní příkaz
+  z Godotu běží z časovače bez 3D pohledu a glTF importér si ho u armatur
+  vyžaduje. Stavba skončila v půlce — odtud zdvojené modely v počátku.
+- **Náhledy modelů byly ve scéně podruhé** (v počátku) a pomocný tvar kostí
+  armatury se válel ve scéně (`Icosphere`).
+- **Terrain3D dostal posun rodiče**, přestože je `top_level`; při importu
+  zpět by se totéž stalo každému `top_level` nodu.
+- **Kontext obsahoval interní mesh Terrain3D** (`MouseQuad`) a geometrii
+  vnořených jednotek dvakrát.
+- **Ctrl+Z ve scéně nevracel import** — akce skončila v globální historii.
+- **Export do `.glb` po uložení zdroje fungoval jen náhodou** —
+  `libraries.write` neuloží cestu exporteru a `wm.collection_export_all`
+  exportuje jen kolekce ve scéně.
+- **Vyrobit zdroj přepojil jen jednu instance** — ostatní instance téhož
+  `.glb` přišly o geometrii.
+- **Odeslání ze skriptu posílalo starou pozici** (nepřepočtená matice).
+- **Poškozený `.blend` vedle assetu shodil otevření celé scény.**
 
 ---
 
@@ -251,6 +305,6 @@ Blender je jen editor nad ní.
 
 ## Co zbývá
 
-- Terrain reference: `Terrain3D ▸ Bake ArrayMesh` → decimovaný mesh jako
-  zamčená podlaha v Blenderu i v kontextu (dnes je terén jen krabice).
-- Volitelně MultiMesh a live-link transformací přes socket.
+- Materiály terénu (dnes jen geometrie).
+- Tráva a stromy z MultiMeshe.
+- Ověření na Windows.

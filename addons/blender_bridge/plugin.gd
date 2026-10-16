@@ -258,7 +258,7 @@ func _import(root: Node, automatic: bool) -> void:
 		if not automatic:
 			print("Blender Bridge: žádné změny.")
 		return
-	BBApply.commit(BBApply.operations(root, plan), get_undo_redo())
+	BBApply.commit(root, BBApply.operations(root, plan), get_undo_redo())
 	BBManifest.store(BBManifest.baseline_path(root), JSON.stringify(manifest, "\t"))
 	_known_md5[path] = FileAccess.get_md5(path)
 	print("Blender Bridge: z Blenderu %s (Ctrl+Z vrátí)" % plan.summary())
