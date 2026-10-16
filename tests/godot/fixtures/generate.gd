@@ -137,6 +137,30 @@ func _second() -> Node:
 	return root
 
 
+## Tři jednobarevné textury a auto shader: tráva (0) na rovině, skála (1)
+## ve svahu. Barvy jsou čisté, aby šly v testu upečené mapy poznat.
+func _terrain_look(terrain: Node3D) -> void:
+	var assets: Object = ClassDB.instantiate("Terrain3DAssets")
+	var colors: Array[Color] = [Color(0.2, 0.6, 0.2), Color(0.5, 0.5, 0.5), Color(0.8, 0.7, 0.4)]
+	var names: PackedStringArray = ["grass", "rock", "sand"]
+	for id: int in colors.size():
+		var image: Image = Image.create_empty(8, 8, true, Image.FORMAT_RGBA8)
+		image.fill(colors[id])
+		image.generate_mipmaps()
+		var texture_asset: Object = ClassDB.instantiate("Terrain3DTextureAsset")
+		texture_asset.set("name", names[id])
+		texture_asset.call("set_albedo_texture", ImageTexture.create_from_image(image))
+		assets.call("set_texture", id, texture_asset)
+	terrain.set("assets", assets)
+	# Parametry shaderu jdou nastavit, až když materiál patří terénu.
+	var material: Object = terrain.get("material")
+	material.call("set_auto_shader", true)
+	material.call("set_shader_param", "auto_base_texture", 1)
+	material.call("set_shader_param", "auto_overlay_texture", 0)
+	material.call("set_shader_param", "auto_slope", 10.0)
+	material.call("set_shader_param", "auto_height_reduction", 0.0)
+
+
 ## Jeden region 256 m s kopcem uprostřed, pod NavigationRegion3D posunutým
 ## o (100, 5, 100). Terrain3D je top_level, takže posun rodiče ho nesmí ovlivnit.
 func _terrain() -> Node3D:
@@ -154,13 +178,21 @@ func _terrain() -> Node3D:
 	# Jako v reálném projektu: terén v počátku, i když rodič je posunutý.
 	terrain.global_transform = Transform3D.IDENTITY
 
+	_terrain_look(terrain)
 	var data: Object = terrain.call("get_data")
 	data.call("add_region_blankp", Vector3(1, 0, 1), true)
-	for x: int in range(0, 256, 4):
-		for z: int in range(0, 256, 4):
-			var distance: float = Vector2(x - 128, z - 128).length()
-			var height: float = maxf(0.0, 20.0 - distance * 0.25)
-			data.call("set_height", Vector3(x, 0, z), height)
+	# Malování: všude písek (id 2), kvadrant x≥128, z<128 auto shader
+	# (tráva na rovině, skála ve svahu), roh x<32, z<32 obarvený do červena.
+	for x: int in 256:
+		for z: int in 256:
+			var position: Vector3 = Vector3(x, 0, z)
+			data.call("set_height", position, maxf(0.0, 20.0 - Vector2(x - 128, z - 128).length() * 0.25))
+			data.call("set_control_base_id", position, 2)
+			data.call("set_control_overlay_id", position, 2)
+			data.call("set_control_blend", position, 0.0)
+			data.call("set_control_auto", position, x >= 128 and z < 128)
+			if x < 32 and z < 32:
+				data.call("set_color", position, Color(1.0, 0.5, 0.5))
 	data.call("update_maps", 3, true, false)
 	data.call("save_directory", "res://fixtures/terrain_data")
 

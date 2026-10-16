@@ -100,7 +100,9 @@ Panel `N ▸ Bridge`:
 - **Odeslat do Godotu**
 - **Znovu načíst z Godotu** — postaví scénu z posledního manifestu (zahodí
   neodeslané změny); hodí se i po změnách v Godotu.
-- **Modely** — seznam všech modelů scény. Klik na jméno model vybere a zaměří.
+- **Modely** — seznam všech modelů scény s hledáním (jméno, cesta v Godotu
+  i název assetu, víc slov = všechna musí sedět). Klik na jméno model vybere
+  a zaměří.
   Vedle je **Upravit** (model má zdrojový `.blend`), nebo **Vyrobit zdroj**
   (model je zatím jen náhled z `.glb`).
 - **Detail** — o vybraném objektu: u modelu node v Godotu, rodič, asset,
@@ -120,7 +122,8 @@ V outlineru:
   potomkem: posun rodiče posune i děti. Když v Blenderu smažeš rodiče a děti
   necháš, v Godotu se přesunou pod nejbližšího předka.
 - `BB_Locked` — skutečná geometrie všeho ostatního ze scény: postavy, budovy,
-  terén (z Terrain3D, vrchol každých 16 m), spawnpointy a markery jako osy
+  terén (z Terrain3D, vrchol každých 16 m, s upečenou barvou), spawnpointy
+  a markery jako osy
   velké 1 m, světla. Jde vybrat
   a zaměřit (`numpad .`), ale ne posunout — změny by se do Godotu stejně
   nepropsaly. Tráva a stromy z MultiMeshe (ProtonScatter) se nepřenáší.
@@ -233,12 +236,25 @@ transformaci pod rodičem.
 `.context.glb` je skutečná geometrie všeho, co vlastní Godot, a terén upečený
 z Terrain3D. `bounds` slouží jako záložní krabice, když `.glb` chybí.
 
+### Materiál terénu
+
+Shader Terrain3D (splatting z texturového pole, control mapa, auto shader podle
+sklonu) do Blenderu 1:1 převést nejde. Plugin proto upeče barvu terénu shora:
+v každém pixelu průměrná barva textur, které tam control mapa míchá — nebo
+auto shader stejným vzorcem jako Terrain3D (`auto_slope`, `auto_height_reduction`,
+`auto_base/overlay_texture`) — vynásobená barevnou mapou. Výsledek vypadá jako
+plochá satelitní mapa bez osvětlení a makrovariace, na rozmisťování stačí.
+
+Textura má 1024 px na delší straně (u 8 × 4 km terénu 7,5 m/px), pečení trvá
+asi 3 s. Ukládá se do `.pipeline/<scéna>.terrain.png` a znovu se počítá, jen
+když se změní data terénu, textury nebo parametry auto shaderu.
+
 ---
 
 ## Testy
 
 ```sh
-python tests/run_tests.py                      # všechno (158 testů), ~35 s
+python tests/run_tests.py                      # všechno (165 testů), ~40 s
 python tests/run_tests.py --only blender       # jedna sada
 python tests/run_tests.py --regen-fixtures     # přegenerovat testovací scény
 ```
@@ -269,7 +285,7 @@ addonů.
 | `Character` (`rig.glb`) | armatura — pomocné tvary kostí importéru |
 | `Character/Helmet`, `Character/Socket` | dítě modelu (výstroj) a marker na modelu |
 | `Spawn`, `Sun`, `Logic/Floating` | kontext bez meshe, Node mezi Node3D |
-| `terrain.tscn` | Terrain3D pod posunutým rodičem, kopec, krabice na vrcholu |
+| `terrain.tscn` | Terrain3D pod posunutým rodičem, kopec, krabice na vrcholu; tři textury, malovaný písek, kvadrant s auto shaderem, obarvený roh |
 | `second.tscn` | otevření neaktivní scény z kontextového menu |
 
 ### Use casy a sady
@@ -291,6 +307,8 @@ addonů.
 | `.bbsrc`, zdroj vedle assetu, poškozený zdroj; Vybrat / Zrušit zdroj | godot, blender |
 | Zdroj mimo projekt: osobní, neuloží se do repa, upozornění, úprava modelu | godot, blender, gui |
 | Děti modelů: hierarchie v Blenderu, posun s rodičem, smazání rodiče | godot, blender, e2e |
+| Materiál terénu: control mapa, auto shader, barevná mapa, cache | godot, blender |
+| Hledání v seznamu modelů | blender, gui |
 | Panel v obou režimech, zaměření pohledu, dohled na terén | gui |
 
 Netestováno na Windows (runner tam GUI sadu přeskočí).
@@ -348,6 +366,6 @@ Blender je jen editor nad ní.
 
 ## Co zbývá
 
-- Materiály terénu (dnes jen geometrie).
+- Úprava heightmapy terénu v Blenderu (rozmyšleno, viz níže).
 - Tráva a stromy z MultiMeshe.
 - Ověření na Windows.

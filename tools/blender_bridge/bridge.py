@@ -516,6 +516,19 @@ def export(scene: bpy.types.Scene) -> dict[str, int]:
     return counts
 
 
+def filter_models(models: list[bpy.types.Object], text: str) -> list[bpy.types.Object]:
+    """Modely, jejichž jméno, cesta v Godotu nebo asset obsahuje [text]
+    (bez ohledu na velikost písmen; víc slov = všechna musí sedět)."""
+    words = text.lower().split()
+    if not words:
+        return list(models)
+
+    def haystack(obj: bpy.types.Object) -> str:
+        return " ".join((obj.name, str(obj.get(P_PATH, "")), os.path.basename(str(obj.get(P_SRC, ""))))).lower()
+
+    return [obj for obj in models if all(word in haystack(obj) for word in words)]
+
+
 def scene_models(scene: bpy.types.Scene) -> list[bpy.types.Object]:
     """Modely, které jdou do Godotu, seřazené podle jména (pro panel i export)."""
     return sorted((obj for obj in scene.objects if P_ID in obj), key=lambda obj: obj.name)

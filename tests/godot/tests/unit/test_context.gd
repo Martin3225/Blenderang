@@ -90,3 +90,86 @@ func test_terrain_is_baked_in_world_space() -> void:
 		near(aabb.end.x, 256.0, "terén končí na x=256", 16.5)
 		near(aabb.end.y, 20.0, "vrchol kopce", 1.0)
 	done()
+
+
+func _terrain_root() -> Node:
+	var root: Node = scene("terrain")
+	await tree.process_frame
+	mark_props(root)
+	return root
+
+
+func _pixel(image: Image, world_x: int, world_z: int) -> Color:
+	# Region je 0–256 m a textura má 1 px na metr.
+	return image.get_pixel(world_x, world_z)
+
+
+func test_terrain_has_baked_material() -> void:
+	if not ClassDB.class_exists("Terrain3D"):
+		skip("Terrain3D není nainstalovaný")
+		return
+	clear_pipeline()
+	var root: Node = await _terrain_root()
+	BBManifest.write(root)
+	var context: Node = _load_context("res://.pipeline/terrain.context.glb")
+	var meshes: Array[MeshInstance3D] = _meshes(context.find_child("Terrain3D", true, false))
+	check(meshes.size() == 1, "terén v kontextu")
+	if meshes.size() == 1:
+		var material: StandardMaterial3D = meshes[0].get_active_material(0) as StandardMaterial3D
+		check(material != null and material.albedo_texture != null, "terén má materiál s texturou")
+		var arrays: Array = meshes[0].mesh.surface_get_arrays(0)
+		check(arrays[Mesh.ARRAY_TEX_UV] != null, "terén má UV")
+	done()
+
+
+func test_terrain_colors_follow_painting() -> void:
+	if not ClassDB.class_exists("Terrain3D"):
+		skip("Terrain3D není nainstalovaný")
+		return
+	clear_pipeline()
+	var root: Node = await _terrain_root()
+	BBManifest.write(root)
+	var image: Image = Image.load_from_file(ProjectSettings.globalize_path("res://.pipeline/terrain.terrain.png"))
+	check(image != null, "upečená textura je v cache")
+	if image == null:
+		done()
+		return
+	eq(image.get_size(), Vector2i(256, 256), "1 px na metr u malého terénu")
+	var sand: Color = Color(0.8, 0.7, 0.4)
+	near(_vec(_pixel(image, 64, 200)), _vec(sand), "ručně malovaný písek", 0.03)
+	near(_vec(_pixel(image, 10, 10)), _vec(sand * Color(1, 0.5, 0.5)), "barevná mapa obarví písek", 0.03)
+	var flat: Color = _pixel(image, 240, 10)
+	near(_vec(flat), Vector3(0.2, 0.6, 0.2), "auto shader: rovina je tráva", 0.03)
+	var slope: Color = _pixel(image, 150, 110)
+	var rock: Vector3 = Vector3(0.5, 0.5, 0.5)
+	check(_vec(slope).distance_to(rock) < _vec(flat).distance_to(rock) - 0.05,
+		"auto shader: svah je víc skála než rovina (%s vs %s)" % [slope, flat])
+	done()
+
+
+func test_terrain_bake_is_cached() -> void:
+	if not ClassDB.class_exists("Terrain3D"):
+		skip("Terrain3D není nainstalovaný")
+		return
+	clear_pipeline()
+	var root: Node = await _terrain_root()
+	var terrain: Node3D = root.get_node("Nav/Terrain3D")
+	var aabb: AABB = (terrain.call("bake_mesh", 4, 0) as Mesh).get_aabb()
+	var base: String = "res://.pipeline/cache_test"
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://.pipeline"))
+	BBTerrain.albedo(terrain, aabb, base)
+	var signature: String = FileAccess.get_file_as_string(base + ".terrain.sig")
+	write_file(base + ".terrain.png.marker", "")
+	# Cache: druhé volání se stejným terénem nepeče znovu.
+	var image: Image = Image.create_empty(1, 1, false, Image.FORMAT_RGB8)
+	image.save_png(ProjectSettings.globalize_path(base + ".terrain.png"))
+	eq(BBTerrain.albedo(terrain, aabb, base).get_size(), Vector2i(1, 1), "beze změny terénu se vezme cache")
+	# Změna materiálu (auto shader) cache zneplatní.
+	terrain.get("material").call("set_shader_param", "auto_slope", 3.0)
+	eq(BBTerrain.albedo(terrain, aabb, base).get_size(), Vector2i(256, 256), "po změně materiálu se peče znovu")
+	check(FileAccess.get_file_as_string(base + ".terrain.sig") != signature, "nový podpis")
+	done()
+
+
+func _vec(color: Color) -> Vector3:
+	return Vector3(color.r, color.g, color.b)

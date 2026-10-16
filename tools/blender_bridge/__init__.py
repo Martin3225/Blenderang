@@ -376,9 +376,15 @@ class BB_PT_panel(bpy.types.Panel):
                 box.label(text=message)
 
         box = layout.box()
-        box.label(text="Modely", icon="OUTLINER_COLLECTION")
         models = bridge.scene_models(scene)
-        for obj in models:
+        shown = bridge.filter_models(models, scene.bb_model_filter)
+        header = box.row()
+        header.label(text="Modely", icon="OUTLINER_COLLECTION")
+        header.label(text="%d z %d" % (len(shown), len(models)) if len(shown) != len(models) else str(len(models)))
+        box.prop(scene, "bb_model_filter", text="", icon="VIEWZOOM")
+        if not shown:
+            box.label(text="Nic neodpovídá hledání.")
+        for obj in shown:
             row = box.row(align=True)
             pick = row.operator(
                 BB_OT_select_model.bl_idname, text=obj.name, emboss=obj == context.active_object,
@@ -472,11 +478,17 @@ _CLASSES = (
 def register() -> None:
     for cls in _CLASSES:
         bpy.utils.register_class(cls)
+    bpy.types.Scene.bb_model_filter = StringProperty(
+        name="Hledat",
+        description="Filtruje seznam modelů podle jména, cesty v Godotu nebo assetu",
+        options={"TEXTEDIT_UPDATE", "SKIP_SAVE"},
+    )
     for handlers, callback in _HANDLERS:
         handlers.append(callback)
 
 
 def unregister() -> None:
+    del bpy.types.Scene.bb_model_filter
     for handlers, callback in _HANDLERS:
         if callback in handlers:
             handlers.remove(callback)

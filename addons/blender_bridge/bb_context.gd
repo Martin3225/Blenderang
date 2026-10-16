@@ -9,9 +9,7 @@ extends RefCounted
 ## Obsahuje jen meshe a jejich materiály. Skripty, kolize, světla ani
 ## MultiMesh (tráva, stromy z ProtonScatteru) se nepřenáší.
 
-## Terrain3D se peče do meshe; LOD 4 = vrchol každých 16 m. Pro referenci
-## při rozmisťování stačí a 8×4 km terén má kolem 120 tisíc vrcholů.
-const TERRAIN_LOD: int = 4
+## Terrain3D se peče do meshe s upečenou barvou, viz BBTerrain.
 
 
 static func path_for(manifest_path: String) -> String:
@@ -22,7 +20,7 @@ static func path_for(manifest_path: String) -> String:
 ## nebo prázdný řetězec, když není co exportovat nebo export selže — Blender
 ## pak místo geometrie použije obálky z manifestu.
 static func write(root: Node, manifest: Dictionary, manifest_path: String) -> String:
-	var tree: Node3D = _build(root, manifest)
+	var tree: Node3D = _build(root, manifest, manifest_path.get_basename())
 	var path: String = path_for(manifest_path)
 	if FileAccess.file_exists(path):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
@@ -46,7 +44,7 @@ static func write(root: Node, manifest: Dictionary, manifest_path: String) -> St
 	return path
 
 
-static func _build(root: Node, manifest: Dictionary) -> Node3D:
+static func _build(root: Node, manifest: Dictionary, cache_base: String) -> Node3D:
 	var tree: Node3D = Node3D.new()
 	tree.name = "Godot"
 	var units: Dictionary = {}
@@ -61,7 +59,7 @@ static func _build(root: Node, manifest: Dictionary) -> Node3D:
 		unit.name = str(entry["name"])
 		unit.transform = BBManifest.global_xform(node, root)
 		if entry.get("kind") == "terrain":
-			_add_terrain(node, unit)
+			_add_terrain(node, unit, cache_base)
 		else:
 			_add_meshes(node, unit, root, units)
 		# Readable unique name: dva „StaticBody3D“ z různých rodičů vedle sebe.
@@ -69,8 +67,8 @@ static func _build(root: Node, manifest: Dictionary) -> Node3D:
 	return tree
 
 
-static func _add_terrain(terrain: Node3D, unit: Node3D) -> void:
-	var mesh: Mesh = terrain.call("bake_mesh", TERRAIN_LOD, 0)
+static func _add_terrain(terrain: Node3D, unit: Node3D, cache_base: String) -> void:
+	var mesh: Mesh = BBTerrain.mesh_with_material(terrain, cache_base)
 	if mesh == null:
 		return
 	var instance: MeshInstance3D = MeshInstance3D.new()

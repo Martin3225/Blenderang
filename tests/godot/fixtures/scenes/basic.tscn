@@ -14,64 +14,64 @@ size = Vector3(4, 3, 4)
 
 [sub_resource type="SphereMesh" id="SphereMesh_k5m8q"]
 
-[node name="Basic" type="Node3D" unique_id=130382680]
+[node name="Basic" type="Node3D" unique_id=714066686]
 
-[node name="Props" type="Node3D" parent="." unique_id=501079806]
+[node name="Props" type="Node3D" parent="." unique_id=793892621]
 
-[node name="Crate" parent="Props" unique_id=844525029 instance=ExtResource("1_w0xm7")]
+[node name="Crate" parent="Props" unique_id=2066179488 instance=ExtResource("1_w0xm7")]
 transform = Transform3D(0.8660254, 0, 0.5, 0, 1, 0, -0.5, 0, 0.8660254, 2, 0, 3)
 
-[node name="Tower" parent="Props" unique_id=220089620 instance=ExtResource("2_jfshb")]
+[node name="Tower" parent="Props" unique_id=1005664823 instance=ExtResource("2_jfshb")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0, 1)
 
-[node name="Barrel" parent="Props" unique_id=1823258258 instance=ExtResource("3_13hfb")]
+[node name="Barrel" parent="Props" unique_id=495031881 instance=ExtResource("3_13hfb")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -5)
 
-[node name="Rotated" type="Node3D" parent="." unique_id=269693677]
+[node name="Rotated" type="Node3D" parent="." unique_id=1314026853]
 transform = Transform3D(-8.742278e-08, 0, 2, 0, 2, 0, -2, 0, -8.742278e-08, 10, 2, 0)
 
-[node name="InRotated" parent="Rotated" unique_id=1985098826 instance=ExtResource("1_w0xm7")]
+[node name="InRotated" parent="Rotated" unique_id=1603786911 instance=ExtResource("1_w0xm7")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0)
 
-[node name="Detached" parent="Rotated" unique_id=1247144303 instance=ExtResource("1_w0xm7")]
+[node name="Detached" parent="Rotated" unique_id=2130812825 instance=ExtResource("1_w0xm7")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 0, 20)
 top_level = true
 
-[node name="Player" parent="." unique_id=1633726830 instance=ExtResource("4_44hmq")]
+[node name="Player" parent="." unique_id=1733719401 instance=ExtResource("4_44hmq")]
 
-[node name="Building" type="StaticBody3D" parent="." unique_id=1284281173]
+[node name="Building" type="StaticBody3D" parent="." unique_id=1161340235]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 0, -10)
 
-[node name="Mesh" type="MeshInstance3D" parent="Building" unique_id=1557934088]
+[node name="Mesh" type="MeshInstance3D" parent="Building" unique_id=1887563196]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
 mesh = SubResource("BoxMesh_ykat5")
 
-[node name="Shape" type="CollisionShape3D" parent="Building" unique_id=203883572]
+[node name="Shape" type="CollisionShape3D" parent="Building" unique_id=1673121915]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
 shape = SubResource("BoxShape3D_6uqui")
 
-[node name="Decoration" parent="Building" unique_id=1378708393 instance=ExtResource("1_w0xm7")]
+[node name="Decoration" parent="Building" unique_id=529480130 instance=ExtResource("1_w0xm7")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, 0)
 
-[node name="Character" parent="." unique_id=455054660 instance=ExtResource("5_hsff3")]
+[node name="Character" parent="." unique_id=1015632350 instance=ExtResource("5_hsff3")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0, -2)
 
-[node name="Helmet" parent="Character" unique_id=1916811142 instance=ExtResource("1_w0xm7")]
+[node name="Helmet" parent="Character" unique_id=2095934152 instance=ExtResource("1_w0xm7")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.8, 0)
 
-[node name="Socket" type="Marker3D" parent="Character" unique_id=980752877]
+[node name="Socket" type="Marker3D" parent="Character" unique_id=1397505327]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
 
-[node name="Spawn" type="Marker3D" parent="." unique_id=1210619962]
+[node name="Spawn" type="Marker3D" parent="." unique_id=358801434]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1)
 
-[node name="Sun" type="DirectionalLight3D" parent="." unique_id=2086113753]
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=1312659063]
 transform = Transform3D(0.8660254, -0.35355338, 0.35355338, 0, 0.70710677, 0.70710677, -0.5, -0.6123724, 0.6123724, 0, 0, 0)
 
-[node name="Logic" type="Node" parent="." unique_id=922143715]
+[node name="Logic" type="Node" parent="." unique_id=1481305150]
 
-[node name="Floating" type="Node3D" parent="Logic" unique_id=1757611879]
+[node name="Floating" type="Node3D" parent="Logic" unique_id=1880500618]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 0)
 
-[node name="Sphere" type="MeshInstance3D" parent="Logic/Floating" unique_id=1387550286]
+[node name="Sphere" type="MeshInstance3D" parent="Logic/Floating" unique_id=731813805]
 mesh = SubResource("SphereMesh_k5m8q")

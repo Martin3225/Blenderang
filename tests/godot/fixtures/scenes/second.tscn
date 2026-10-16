@@ -2,7 +2,7 @@
 
 [ext_resource type="PackedScene" path="res://fixtures/assets/crate.glb" id="1_wy23q"]
 
-[node name="Second" type="Node3D" unique_id=171232684]
+[node name="Second" type="Node3D" unique_id=2104777825]
 
-[node name="Crate" parent="." unique_id=844525029 instance=ExtResource("1_wy23q")]
+[node name="Crate" parent="." unique_id=2066179488 instance=ExtResource("1_wy23q")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1)

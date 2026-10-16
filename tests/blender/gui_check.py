@@ -101,6 +101,15 @@ def step_scene_opened():
            scene.get(bridge.S_MANIFEST, "").endswith("basic.json") and scene.name == "basic", scene.name)
     ok, message = panel_drew("scene")
     record("panel scény se vykreslí bez chyby", ok, message)
+    scene.bb_model_filter = "rotated"
+    drawn.clear()
+    ok, message = panel_drew("scene")
+    record("panel s hledáním se vykreslí", ok, message)
+    scene.bb_model_filter = "nic takoveho"
+    drawn.clear()
+    ok, message = panel_drew("scene")
+    record("panel bez výsledků hledání se vykreslí", ok, message)
+    scene.bb_model_filter = ""
     for name in ("Crate", "Building"):
         bpy.context.view_layer.objects.active = bpy.data.objects[name]
         drawn.clear()

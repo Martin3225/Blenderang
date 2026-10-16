@@ -340,3 +340,30 @@ class ChooseSourceTest(BridgeCase):
         scene = self.open_scene()
         with self.assertRaises(bridge.BridgeError):
             bridge.choose_source(scene, self.CRATE, os.path.join(harness.ASSETS, "crate.glb"))
+
+
+class TerrainMaterialTest(BridgeCase):
+    def test_terrain_has_textured_material(self):
+        if not os.path.exists(self.manifest_path("terrain")):
+            self.skipTest("Terrain3D není nainstalovaný")
+        self.open_scene("terrain")
+        terrain = bpy.data.objects["TerrainMesh"]
+        self.assertTrue(terrain.data.uv_layers, "terén má UV")
+        material = terrain.active_material
+        self.assertIsNotNone(material, "terén má materiál")
+        images = [n.image for n in material.node_tree.nodes if n.type == "TEX_IMAGE" and n.image]
+        self.assertEqual(len(images), 1, "materiál má upečenou texturu")
+        self.assertEqual(tuple(images[0].size), (256, 256))
+
+
+class FilterTest(BridgeCase):
+    def test_filter_by_name_path_and_asset(self):
+        scene = self.open_scene()
+        models = bridge.scene_models(scene)
+        names = lambda text: [o.name for o in bridge.filter_models(models, text)]
+        self.assertEqual(names(""), list(MODELS))
+        self.assertEqual(names("tow"), ["Tower"], "část jména")
+        self.assertEqual(names("ROTATED"), ["Detached", "InRotated"], "cesta v Godotu, bez ohledu na velikost")
+        self.assertEqual(names("crate.glb"), ["Crate", "Detached", "Helmet", "InRotated"], "jméno assetu")
+        self.assertEqual(names("crate rotated"), ["Detached", "InRotated"], "víc slov = všechna")
+        self.assertEqual(names("nic takoveho"), [])
