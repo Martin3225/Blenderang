@@ -49,7 +49,23 @@ class BB_PT_probe(blender_bridge.BB_PT_panel):
             drawn.append((mode, traceback.format_exc(limit=2)))
 
 
+class BB_PT_probe_detail(blender_bridge.BB_PT_detail):
+    """Panel Detail v záložce Item, se zaznamenáním výjimek."""
+
+    bl_idname = "BB_PT_probe_detail"
+    bl_category = "Item"
+    bl_parent_id = ""
+
+    def draw(self, context):
+        try:
+            super().draw(context)
+            drawn.append(("detail", None))
+        except Exception:  # noqa: BLE001
+            drawn.append(("detail", traceback.format_exc(limit=2)))
+
+
 bpy.utils.register_class(BB_PT_probe)
+bpy.utils.register_class(BB_PT_probe_detail)
 
 
 def view3d():
@@ -85,6 +101,11 @@ def step_scene_opened():
            scene.get(bridge.S_MANIFEST, "").endswith("basic.json") and scene.name == "basic", scene.name)
     ok, message = panel_drew("scene")
     record("panel scény se vykreslí bez chyby", ok, message)
+    for name in ("Crate", "Building"):
+        bpy.context.view_layer.objects.active = bpy.data.objects[name]
+        drawn.clear()
+        ok, message = panel_drew("detail")
+        record("detail pro %s se vykreslí" % name, ok, message)
 
     window, area = view3d()
     space = area.spaces.active

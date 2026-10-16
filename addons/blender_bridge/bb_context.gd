@@ -19,12 +19,23 @@ static func path_for(manifest_path: String) -> String:
 
 
 ## Postaví dočasný strom s kopiemi meshů a uloží ho jako glTF. Vrací cestu,
-## nebo prázdný řetězec při chybě.
+## nebo prázdný řetězec, když není co exportovat nebo export selže — Blender
+## pak místo geometrie použije obálky z manifestu.
 static func write(root: Node, manifest: Dictionary, manifest_path: String) -> String:
 	var tree: Node3D = _build(root, manifest)
+	var path: String = path_for(manifest_path)
+	if FileAccess.file_exists(path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	if tree.find_children("*", "MeshInstance3D", true, false).is_empty():
+		# glTF bez jediného meshe má prázdný buffer a Blender ho odmítne načíst.
+		tree.free()
+		return ""
+	# V editoru glTF export přeskakuje nody bez ownera (jako při ukládání
+	# scény). Mimo editor ne — proto to headless testy dlouho nechytily.
+	for node: Node in tree.find_children("*", "", true, false):
+		node.owner = tree
 	var document: GLTFDocument = GLTFDocument.new()
 	var state: GLTFState = GLTFState.new()
-	var path: String = path_for(manifest_path)
 	var err: Error = document.append_from_scene(tree, state)
 	if err == OK:
 		err = document.write_to_filesystem(state, ProjectSettings.globalize_path(path))

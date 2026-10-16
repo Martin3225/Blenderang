@@ -103,6 +103,12 @@ Panel `N ▸ Bridge`:
 - **Modely** — seznam všech modelů scény. Klik na jméno model vybere a zaměří.
   Vedle je **Upravit** (model má zdrojový `.blend`), nebo **Vyrobit zdroj**
   (model je zatím jen náhled z `.glb`).
+- **Detail** — o vybraném objektu: u modelu node v Godotu, rodič, asset,
+  zdrojový `.blend` (nebo kam se vyrobí) a id; u objektu z Godotu, ke kterému
+  nodu patří; u ostatního, že je to pomocný objekt, který se neposílá.
+- Pokud se něco nepodařilo načíst (vadný asset, vadný kontext), panel to
+  vypíše červeně. Scéna se i tak dostaví — vadný model zůstane jako osa na
+  svém místě, místo vadného kontextu jsou obálky.
 
 V outlineru:
 
@@ -211,7 +217,7 @@ z Terrain3D. `bounds` slouží jako záložní krabice, když `.glb` chybí.
 ## Testy
 
 ```sh
-python tests/run_tests.py                      # všechno, ~35 s
+python tests/run_tests.py                      # všechno (135 testů), ~35 s
 python tests/run_tests.py --only blender       # jedna sada
 python tests/run_tests.py --regen-fixtures     # přegenerovat testovací scény
 ```
@@ -266,7 +272,14 @@ Netestováno na Windows (runner tam GUI sadu přeskočí).
 
 ### Co testy našly
 
-Při psaní testů se ukázalo devět chyb, všechny opravené:
+Při psaní testů a prvním ostrém použití se ukázalo jedenáct chyb, všechny
+opravené a pokryté testem:
+
+- **Kontext exportovaný z editoru byl prázdný.** glTF export v editoru
+  přeskakuje nody bez `owner`; mimo editor ne, proto to headless testy
+  nechytily. Editor test teď kontroluje i obsah `.context.glb`.
+- **Vadný `.glb` shodil celou stavbu scény** — Blender pak neukázal kontext,
+  seznam modelů ani detail.
 
 - **Blender v okně spadl při stavbě scény s armaturou.** Startovní příkaz
   z Godotu běží z časovače bez 3D pohledu a glTF importér si ho u armatur

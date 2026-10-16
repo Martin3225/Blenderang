@@ -289,14 +289,25 @@ class BB_PT_panel(bpy.types.Panel):
 
     def _draw_scene(self, context: bpy.types.Context) -> None:
         layout = self.layout
+        scene = context.scene
+        layout.label(text="Scéna: %s" % scene.name, icon="SCENE_DATA")
         send = layout.row()
         send.scale_y = 1.6
         send.operator(BB_OT_export_manifest.bl_idname, icon="EXPORT")
         layout.operator(BB_OT_rebuild.bl_idname, icon="FILE_REFRESH")
 
+        warnings = list(scene.get(bridge.S_WARNINGS, []))
+        if warnings:
+            box = layout.box()
+            box.alert = True
+            box.label(text="Načteno s problémy:", icon="ERROR")
+            for message in warnings:
+                box.label(text=message)
+
         box = layout.box()
         box.label(text="Modely", icon="OUTLINER_COLLECTION")
-        for obj in bridge.scene_models(context.scene):
+        models = bridge.scene_models(scene)
+        for obj in models:
             row = box.row(align=True)
             pick = row.operator(
                 BB_OT_select_model.bl_idname, text=obj.name, emboss=obj == context.active_object,
@@ -307,7 +318,7 @@ class BB_PT_panel(bpy.types.Panel):
                 row.operator(BB_OT_edit_source.bl_idname, text="Upravit", icon="EDITMODE_HLT").name = obj.name
             else:
                 row.operator(BB_OT_promote_source.bl_idname, text="Vyrobit zdroj", icon="FILE_NEW").name = obj.name
-        if any(o.get(bridge.P_TIER) != "library" for o in bridge.scene_models(context.scene)):
+        if any(o.get(bridge.P_TIER) != "library" for o in models):
             box.label(text="Bez zdroje je model jen náhled z .glb.", icon="INFO")
 
     def _draw_edit(self, session: dict) -> None:
@@ -317,6 +328,44 @@ class BB_PT_panel(bpy.types.Panel):
         back.scale_y = 1.6
         back.operator(BB_OT_return_to_scene.bl_idname, icon="LOOP_BACK")
         layout.label(text="Ctrl+S uloží model a přegeneruje .glb", icon="CHECKMARK")
+        column = layout.column(align=True)
+        column.label(text="Export: %s" % session["asset"].replace("res://", "", 1))
+        column.label(text="Okolí ze scény je jen pro orientaci a neukládá se.")
+
+
+class BB_PT_detail(bpy.types.Panel):
+    """Podrobnosti o vybraném objektu: odkud je a co se s ním stane."""
+
+    bl_label = "Detail"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "Bridge"
+    bl_parent_id = "BB_PT_panel"
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context) -> bool:
+        return context.scene.get(bridge.S_MANIFEST) is not None and bridge.edit_session() is None
+
+    def draw(self, context: bpy.types.Context) -> None:
+        layout = self.layout
+        obj = context.active_object
+        if obj is None:
+            layout.label(text="Vyber objekt.")
+            return
+        kind, rows = bridge.describe(obj)
+        if kind == "model":
+            layout.label(text=obj.name, icon="OBJECT_DATA")
+        elif kind == "godot":
+            layout.label(text="%s — z Godotu" % obj.name, icon="LOCKED")
+            layout.label(text="Jen pro orientaci, změny se neposílají.")
+        else:
+            layout.label(text="%s — pomocný objekt" % obj.name, icon="GHOST_ENABLED")
+            layout.label(text="Do Godotu se neposílá a příště zmizí.")
+        column = layout.column(align=True)
+        for label, value in rows:
+            split = column.split(factor=0.35)
+            split.label(text=label)
+            split.label(text=value)
 
 
 _CLASSES = (
@@ -329,6 +378,7 @@ _CLASSES = (
     BB_OT_select_model,
     BB_OT_return_to_scene,
     BB_PT_panel,
+    BB_PT_detail,
 )
 
 

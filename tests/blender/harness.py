@@ -19,6 +19,7 @@ PROJECT = ""
 ASSETS = ""
 PIPELINE = ""
 _PRISTINE_ASSETS = ""
+_PRISTINE_PIPELINE = ""
 
 
 def configure(project: str) -> None:
@@ -29,6 +30,10 @@ def configure(project: str) -> None:
     _PRISTINE_ASSETS = os.path.join(project, ".pipeline", "pristine_assets")
     if not os.path.isdir(_PRISTINE_ASSETS):
         shutil.copytree(ASSETS, _PRISTINE_ASSETS)
+    global _PRISTINE_PIPELINE
+    _PRISTINE_PIPELINE = os.path.join(project, ".pipeline_pristine")
+    if not os.path.isdir(_PRISTINE_PIPELINE):
+        shutil.copytree(PIPELINE, _PRISTINE_PIPELINE, ignore=shutil.ignore_patterns("pristine_assets"))
 
 
 def godot_to_blender_point(x: float, y: float, z: float) -> Vector:
@@ -46,10 +51,11 @@ class BridgeCase(unittest.TestCase):
         self._restore()
 
     def _restore(self) -> None:
-        for name in os.listdir(PIPELINE):
-            if name.endswith(".pristine.json"):
-                shutil.copyfile(os.path.join(PIPELINE, name),
-                                os.path.join(PIPELINE, name.replace(".pristine", "")))
+        # Manifesty i geometrie kontextu, jak je vyexportoval Godot.
+        for name in os.listdir(_PRISTINE_PIPELINE):
+            source = os.path.join(_PRISTINE_PIPELINE, name)
+            if os.path.isfile(source):
+                shutil.copyfile(source, os.path.join(PIPELINE, name))
         marker = os.path.join(PIPELINE, "bb_edit.json")
         if os.path.exists(marker):
             os.remove(marker)

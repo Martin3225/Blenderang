@@ -28,6 +28,7 @@ P_PREVIEW = "bb_preview"
 
 S_MANIFEST = "bb_manifest"
 S_ROOT = "bb_project_root"
+S_WARNINGS = "bb_warnings"
 
 COLL_LAYOUT = "BB_Layout"
 COLL_LOCKED = "BB_Locked"
@@ -183,12 +184,21 @@ def _import_file(path: str) -> tuple[list[bpy.types.Object], list[bpy.types.Obje
     extension = os.path.splitext(path)[1].lower()
     objects_before = set(bpy.data.objects)
     collections_before = set(bpy.data.collections)
-    if extension in (".glb", ".gltf"):
-        bpy.ops.import_scene.gltf(filepath=path)
-    elif extension == ".fbx":
-        bpy.ops.import_scene.fbx(filepath=path)
-    else:
-        raise BridgeError("nepodporovaný formát %s" % path)
+    try:
+        if extension in (".glb", ".gltf"):
+            bpy.ops.import_scene.gltf(filepath=path)
+        elif extension == ".fbx":
+            bpy.ops.import_scene.fbx(filepath=path)
+        else:
+            raise BridgeError("nepodporovaný formát")
+    except (RuntimeError, BridgeError) as error:
+        # Po neúspěšném importu nesmí ve scéně nic zůstat napůl.
+        for obj in set(bpy.data.objects) - objects_before:
+            bpy.data.objects.remove(obj, do_unlink=True)
+        for collection in set(bpy.data.collections) - collections_before:
+            bpy.data.collections.remove(collection)
+        message = str(error).strip().splitlines()[-1] if str(error).strip() else type(error).__name__
+        raise BridgeError("%s: %s" % (os.path.basename(path), message)) from error
     objects: list[bpy.types.Object] = []
     helpers: list[bpy.types.Object] = []
     for obj in set(bpy.data.objects) - objects_before:
@@ -213,8 +223,13 @@ def _preview_collection(entry: dict[str, Any], root: str) -> bpy.types.Collectio
         return existing
     path = asset_abs(root, entry.get("src", ""))
     if not os.path.isfile(path):
+        warn("%s: asset %s neexistuje" % (entry.get("name"), entry.get("src")))
         return None
-    objects, _ = _import_file(path)
+    try:
+        objects, _ = _import_file(path)
+    except BridgeError as error:
+        warn("%s: náhled nejde načíst (%s)" % (entry.get("name"), error))
+        return None
     collection = bpy.data.collections.new(stem)
     collection[P_PREVIEW] = True
     for obj in objects:
@@ -295,8 +310,23 @@ def lock(obj: bpy.types.Object) -> None:
     obj.lock_scale = (True, True, True)
 
 
+# Problémy, které nezastaví stavbu scény (vadný asset, vadný kontext), ale
+# uživatel o nich má vědět. Panel je ukáže, operátor nahlásí.
+WARNINGS: list[str] = []
+
+
+def warn(message: str) -> None:
+    WARNINGS.append(message)
+    print("Blender Bridge:", message)
+
+
 def build(scene: bpy.types.Scene, manifest_path: str) -> dict[str, int]:
-    """Postaví scénu z manifestu. Existující BB objekty nahradí."""
+    """Postaví scénu z manifestu. Existující BB objekty nahradí.
+
+    Jeden vadný soubor nesmí shodit celou stavbu: model bez náhledu zůstane
+    jako osa na svém místě, vadný kontext se nahradí obálkami.
+    """
+    WARNINGS.clear()
     manifest = load_manifest(manifest_path)
     root = project_root_for(manifest_path)
 
@@ -317,6 +347,7 @@ def build(scene: bpy.types.Scene, manifest_path: str) -> dict[str, int]:
     counts["proxies"] = import_context(root, manifest, locked, Matrix.Identity(4))
     scene[S_MANIFEST] = manifest_path
     scene[S_ROOT] = root
+    scene[S_WARNINGS] = list(WARNINGS)
     return counts
 
 
@@ -334,8 +365,13 @@ def import_context(
     """
     context_path = os.path.join(root, manifest.get("context_glb", ""))
     godot_entries = [e for e in manifest["nodes"] if e.get("owner") != "blender"]
+    objects: list[bpy.types.Object] | None = None
     if manifest.get("context_glb") and os.path.isfile(context_path):
-        objects, _ = _import_file(context_path)
+        try:
+            objects, _ = _import_file(context_path)
+        except BridgeError as error:
+            warn("kontext z Godotu nejde načíst (%s), použijí se obálky" % error)
+    if objects is not None:
         for obj in objects:
             target.objects.link(obj)
             obj[P_PATH] = "context"
@@ -636,6 +672,7 @@ def build_context(session: dict[str, Any]) -> int:
     Všechno je posunuté do prostoru modelu, jako by stál na svém místě.
     """
     clear_context()
+    WARNINGS.clear()
     manifest = load_manifest(session["manifest"])
     focus = next((e for e in manifest["nodes"] if e.get("bb_id") == session["bb_id"]), None)
     if focus is None:
@@ -701,3 +738,31 @@ def setup_session_exporter(session: dict[str, Any]) -> str:
     target = asset_abs(session["root"], session["asset"])
     ensure_exporter(collection, target)
     return target
+
+
+# ------------------------------------------------------------------ detail
+
+
+def describe(obj: bpy.types.Object) -> tuple[str, list[tuple[str, str]]]:
+    """Co panel Detail ukáže o objektu: druh a řádky (popisek, hodnota).
+
+    Druhy: ``model`` (posílá se do Godotu), ``godot`` (kontext z Godotu,
+    jen pro orientaci), ``helper`` (pomocný objekt, do Godotu se neposílá).
+    """
+    if P_ID in obj:
+        tier = obj.get(P_TIER, "none")
+        source = obj.get(P_SRC_BLEND, "")
+        rows = [
+            ("Node v Godotu", str(obj.get(P_PATH, ""))),
+            ("Rodič", str(obj.get(P_PARENT, "."))),
+            ("Asset", str(obj.get(P_SRC, "")).replace("res://", "", 1)),
+            ("Zdroj", source if tier == "library" else "není — vyrobí se %s" % expected_source(str(obj.get(P_SRC, "")))),
+            ("Id", str(obj.get(P_ID, ""))),
+        ]
+        return "model", rows
+    unit = obj
+    while unit.parent is not None and unit.parent.parent is not None:
+        unit = unit.parent
+    if obj.get(P_PATH) == "context" or unit.get(P_PATH) == "context":
+        return "godot", [("Node v Godotu", unit.name)]
+    return "helper", []

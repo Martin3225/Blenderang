@@ -165,3 +165,58 @@ class BuildSceneTest(BridgeCase):
     def test_panel_lists_all_models(self):
         scene = self.open_scene()
         self.assertEqual([o.name for o in bridge.scene_models(scene)], list(MODELS))
+
+
+class ResilienceTest(BridgeCase):
+    """Jeden vadný soubor nesmí shodit stavbu celé scény."""
+
+    def test_corrupt_context_falls_back_to_boxes(self):
+        manifest = self.read_manifest()
+        with open(os.path.join(harness.PROJECT, manifest["context_glb"]), "wb") as handle:
+            handle.write(b"glTF\x02\x00\x00\x00\x10\x01\x00\x00")   # jako prázdný export z editoru
+        scene = self.open_scene()
+        self.assertTrue(scene.get(bridge.S_MANIFEST), "scéna se dostavěla")
+        self.assertEqual(bpy.data.objects["Building"].type, "MESH")
+        self.assertEqual(len(bpy.data.objects["Building"].data.vertices), 8)
+        self.assertTrue(any("kontext" in w for w in scene[bridge.S_WARNINGS]), list(scene[bridge.S_WARNINGS]))
+        self.assertFalse([o for o in scene.objects if not o.users_collection or
+                          not {c.name for c in o.users_collection} & {bridge.COLL_LAYOUT, bridge.COLL_LOCKED}],
+                         "po neúspěšném importu nic nezůstalo napůl")
+
+    def test_corrupt_asset_does_not_break_other_models(self):
+        with open(os.path.join(harness.ASSETS, "tower.glb"), "wb") as handle:
+            handle.write(b"not a glb")
+        scene = self.open_scene()
+        self.assertTrue(scene.get(bridge.S_MANIFEST))
+        self.assertIsNone(bpy.data.objects["Tower"].instance_collection, "rozbitý asset zůstane osou")
+        self.assertIsNotNone(bpy.data.objects["Crate"].instance_collection, "ostatní modely jsou v pořádku")
+        self.assertTrue(any("Tower" in w for w in scene[bridge.S_WARNINGS]), list(scene[bridge.S_WARNINGS]))
+
+    def test_clean_build_has_no_warnings(self):
+        scene = self.open_scene()
+        self.assertEqual(list(scene[bridge.S_WARNINGS]), [])
+
+
+class DetailTest(BridgeCase):
+    def test_model_detail(self):
+        self.open_scene()
+        kind, rows = bridge.describe(bpy.data.objects["InRotated"])
+        values = dict(rows)
+        self.assertEqual(kind, "model")
+        self.assertEqual(values["Node v Godotu"], "Rotated/InRotated")
+        self.assertEqual(values["Rodič"], "Rotated")
+        self.assertEqual(values["Asset"], "fixtures/assets/crate.glb")
+        self.assertIn("fixtures/assets/crate.blend", values["Zdroj"])
+
+    def test_godot_context_detail_names_the_godot_node(self):
+        self.open_scene()
+        mesh = next(c for c in bpy.data.objects["Building"].children_recursive if c.type == "MESH")
+        kind, rows = bridge.describe(mesh)
+        self.assertEqual(kind, "godot")
+        self.assertEqual(dict(rows)["Node v Godotu"], "Building")
+
+    def test_helper_detail(self):
+        self.open_scene()
+        helper = bpy.data.objects.new("Pomocna", None)
+        bpy.context.scene.collection.objects.link(helper)
+        self.assertEqual(bridge.describe(helper)[0], "helper")

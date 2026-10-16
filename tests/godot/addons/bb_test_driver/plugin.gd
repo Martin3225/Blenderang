@@ -73,7 +73,15 @@ func _phase_open_and_watch(bridge: EditorPlugin) -> void:
 
 	var saved: String = FileAccess.get_file_as_string("res://fixtures/scenes/basic.tscn")
 	_record("scéna je uložená i se značkami", saved.count("metadata/bb_id") == 6, "bb_id v souboru: %d" % saved.count("metadata/bb_id"))
-	_record("vedle manifestu je geometrie kontextu", FileAccess.file_exists("res://.pipeline/basic.context.glb"), "")
+	# V editoru glTF export přeskakuje nody bez ownera — tady se to projeví,
+	# mimo editor ne.
+	var context: Dictionary = _glb_json("res://.pipeline/basic.context.glb")
+	var names: PackedStringArray = []
+	for node: Dictionary in context.get("nodes", []):
+		names.append(str(node.get("name", "")))
+	_record("kontext z editoru obsahuje geometrii scény",
+		names.has("Building") and names.has("Player") and context.get("meshes", []).size() >= 3,
+		"nody: %s, meshe: %d" % [names, context.get("meshes", []).size()])
 
 	var crate: Node3D = root.get_node("Props/Crate")
 	var history: UndoRedo = _history(root)
@@ -160,6 +168,16 @@ func _fake_blender_args() -> PackedStringArray:
 			return PackedStringArray([lines[0], "\n".join(lines.slice(1))]) if lines.size() > 1 else lines
 		await get_tree().create_timer(0.05).timeout
 	return PackedStringArray()
+
+
+## JSON část .glb souboru (bez binárního bufferu).
+func _glb_json(path: String) -> Dictionary:
+	var bytes: PackedByteArray = FileAccess.get_file_as_bytes(path)
+	if bytes.size() < 20:
+		return {}
+	var length: int = bytes.decode_u32(12)
+	var parsed: Variant = JSON.parse_string(bytes.slice(20, 20 + length).get_string_from_utf8())
+	return parsed if parsed is Dictionary else {}
 
 
 func _move_in_manifest(path: String, name: String, origin: Vector3) -> void:
