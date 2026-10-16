@@ -9,6 +9,11 @@ extends EditorPlugin
 ## Změny z Blenderu se do otevřené scény načtou samy.
 
 const MENU_NAME: String = "Blender Bridge"
+const PERSONAL_SOURCE_NOTICE: String = """%s leží mimo Godot projekt.
+
+Cesta se neuloží do projektu — platí jen u tebe. Ostatní v týmu tenhle zdroj neuvidí a model upravit nemůžou; uvidí dál jen .glb.
+
+Aby zdroj měli všichni, dej .blend do projektu a vyber ho znovu."""
 const WATCH_INTERVAL: float = 1.0
 
 enum Action {
@@ -154,19 +159,32 @@ func _pick_source() -> void:
 	var asset: String = selected[0].scene_file_path
 	var dialog: EditorFileDialog = EditorFileDialog.new()
 	dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_FILE
-	dialog.access = EditorFileDialog.ACCESS_RESOURCES
+	# Celý disk: zdroj nemusí být v projektu, ne každý v týmu má zdrojáky.
+	dialog.access = EditorFileDialog.ACCESS_FILESYSTEM
 	dialog.add_filter("*.blend", "Blender soubory")
 	dialog.title = "Zdrojový .blend pro %s" % asset.get_file()
-	dialog.current_path = "res://" + BBPaths.expected_source_for(asset)
+	dialog.current_path = ProjectSettings.globalize_path("res://" + BBPaths.expected_source_for(asset))
 	dialog.file_selected.connect(func(path: String) -> void:
-		if BBPaths.write_override(asset, path):
-			EditorInterface.get_resource_filesystem().scan()
-			print("Blender Bridge: %s → %s" % [asset.get_file(), path])
 		dialog.queue_free()
+		var personal: bool = BBPaths.choose_source(asset, path)
+		EditorInterface.get_resource_filesystem().scan()
+		print("Blender Bridge: %s → %s%s" % [asset.get_file(), path, " (jen u tebe)" if personal else ""])
+		if personal:
+			_warn_personal_source(path)
 	)
 	dialog.canceled.connect(dialog.queue_free)
 	EditorInterface.get_base_control().add_child(dialog)
 	dialog.popup_centered_ratio(0.6)
+
+
+func _warn_personal_source(path: String) -> void:
+	var notice: AcceptDialog = AcceptDialog.new()
+	notice.title = "Zdroj mimo projekt"
+	notice.dialog_text = PERSONAL_SOURCE_NOTICE % path
+	notice.confirmed.connect(notice.queue_free)
+	notice.canceled.connect(notice.queue_free)
+	EditorInterface.get_base_control().add_child(notice)
+	notice.popup_centered()
 
 
 func _mark(nodes: Array[Node], root: Node) -> void:

@@ -143,6 +143,23 @@ def step_back_in_scene():
     drawn.clear()
     ok, message = panel_drew("scene")
     record("panel scény po návratu", ok, message)
+
+    # Zdroj mimo projekt: upozornění v okně a výstraha v panelu Detail.
+    outside = os.path.join(os.path.dirname(options["--project"]), "outside_sources", "gui_crate.blend")
+    os.makedirs(os.path.dirname(outside), exist_ok=True)
+    collection = bpy.data.collections.new("crate_master")
+    collection.objects.link(bpy.data.objects.new("crate_master_body", None))
+    bpy.data.libraries.write(outside, {collection}, fake_user=True)
+    window, area = view3d()
+    with bpy.context.temp_override(window=window, area=area):
+        result = bpy.ops.bb.choose_source(name="Crate", filepath=outside)
+    record("vybrat zdroj mimo projekt z okna", result == {"FINISHED"})
+    record("zdroj mimo projekt je osobní",
+           bridge.source_choice(options["--project"], "res://fixtures/assets/crate.glb") == "personal")
+    bpy.context.view_layer.objects.active = bpy.data.objects["Crate"]
+    drawn.clear()
+    ok, message = panel_drew("detail")
+    record("detail s osobním zdrojem se vykreslí", ok, message)
     return None
 
 

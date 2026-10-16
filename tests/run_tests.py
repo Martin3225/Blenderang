@@ -169,9 +169,18 @@ class Tools:
         command = [self.godot, "--headless", "--editor", "--path", str(PROJECT), scene]
         return self.run(name, command, timeout, self.godot_env(env))
 
+    @staticmethod
+    def blender_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+        """Blender s vlastním uživatelským adresářem: konfigurace ani odkaz na
+        rozpracovanou úpravu se nemíchají s tvým Blenderem."""
+        env = dict(os.environ)
+        env["BLENDER_USER_RESOURCES"] = str(HOME / "blender")
+        env.update(extra or {})
+        return env
+
     def blender_script(self, name: str, script: Path, args: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
         command = [self.blender, "--background", "--factory-startup", "--python", str(script), "--", *args]
-        return self.run(name, command, timeout)
+        return self.run(name, command, timeout, self.blender_env())
 
 
 # ------------------------------------------------------------- příprava
@@ -323,7 +332,7 @@ def suite_gui(tools: Tools) -> list[dict]:
     )
     try:
         time.sleep(1.5)
-        env = {k: v for k, v in os.environ.items() if k not in ("WAYLAND_DISPLAY", "XAUTHORITY")}
+        env = {k: v for k, v in tools.blender_env().items() if k not in ("WAYLAND_DISPLAY", "XAUTHORITY")}
         env["DISPLAY"] = f":{display}"
         tools.run("gui", [
             tools.blender, "--factory-startup", "--python-expr", expression,

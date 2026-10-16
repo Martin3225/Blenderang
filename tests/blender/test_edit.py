@@ -98,3 +98,33 @@ class EditTest(BridgeCase):
         self.assertEqual(len(exporters), 1)
         self.assertTrue(bridge._same_file(bpy.path.abspath(exporters[0].export_properties.filepath),
                                           os.path.join(harness.ASSETS, "tower.glb")))
+
+
+class PersonalSourceEditTest(BridgeCase):
+    """Úprava modelu, jehož zdroj leží mimo projekt."""
+
+    def test_edit_personal_source(self):
+        from test_build import write_source
+        outside = os.path.join(os.path.dirname(harness.PROJECT), "outside_sources", "tower_master.blend")
+        os.makedirs(os.path.dirname(outside), exist_ok=True)
+        write_source(os.path.relpath(outside, harness.ASSETS), "tower")
+        self.addCleanup(lambda: os.path.exists(outside) and os.remove(outside))
+        scene = self.open_scene()
+        bridge.choose_source(scene, "res://fixtures/assets/tower.glb", outside)
+
+        self.assertTrue(bridge._pointer_path().startswith(os.path.dirname(harness.PROJECT)),
+                        "odkaz na úpravu je v izolované konfiguraci testů, ne u uživatele")
+        self.assertEqual(bpy.ops.bb.edit_source(name="Tower"), {"FINISHED"})
+        self.assertTrue(bridge._same_file(bpy.data.filepath, outside))
+        self.assertIsNotNone(bridge.edit_session(), "úprava se najde i mimo projekt")
+        self.assertIsNotNone(bpy.data.collections.get(bridge.COLL_CONTEXT))
+
+        glb = os.path.join(harness.ASSETS, "tower.glb")
+        before = os.stat(glb).st_mtime_ns
+        time.sleep(0.05)
+        bpy.ops.wm.save_mainfile()
+        self.assertGreater(os.stat(glb).st_mtime_ns, before, "uložení přegeneruje .glb v projektu")
+
+        self.assertEqual(bpy.ops.bb.return_to_scene(), {"FINISHED"})
+        self.assertIsNone(bridge.edit_session())
+        self.assertEqual(bpy.data.objects["Tower"].get(bridge.P_SRC_BLEND), outside)

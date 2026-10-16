@@ -202,11 +202,36 @@ class BB_OT_choose_source(bpy.types.Operator, ImportHelper):
         if obj is None or bridge.P_ID not in obj:
             return _report(self, bridge.BridgeError("vyber model"))
         try:
-            relative = bridge.choose_source(context.scene, str(obj.get(bridge.P_SRC, "")), self.filepath)
+            path, personal = bridge.choose_source(context.scene, str(obj.get(bridge.P_SRC, "")), self.filepath)
         except (bridge.BridgeError, OSError) as error:
             return _report(self, error)
-        self.report({"INFO"}, "Zdroj: %s" % relative)
+        if personal:
+            self.report({"WARNING"}, "Zdroj mimo projekt — platí jen u tebe, ostatní ho neuvidí")
+            _notify_personal_source(context, path)
+        else:
+            self.report({"INFO"}, "Zdroj: %s" % path)
         return {"FINISHED"}
+
+
+PERSONAL_SOURCE_NOTICE = (
+    "Soubor leží mimo Godot projekt.",
+    "Cesta se neuloží do projektu — platí jen u tebe.",
+    "Ostatní v týmu tenhle zdroj neuvidí a model upravit nemůžou;",
+    "uvidí dál jen .glb.",
+    "Aby zdroj měli všichni, dej .blend do projektu a vyber ho znovu.",
+)
+
+
+def _notify_personal_source(context: bpy.types.Context, path: str) -> None:
+    if bpy.app.background or context.window_manager is None:
+        return
+
+    def draw(menu: bpy.types.Menu, _context: bpy.types.Context) -> None:
+        menu.layout.label(text=path, icon="FILE_BLEND")
+        for line in PERSONAL_SOURCE_NOTICE:
+            menu.layout.label(text=line)
+
+    context.window_manager.popup_menu(draw, title="Zdroj jen u tebe", icon="ERROR")
 
 
 class BB_OT_clear_source(bpy.types.Operator):
@@ -407,7 +432,13 @@ class BB_PT_detail(bpy.types.Panel):
             else:
                 actions.operator(BB_OT_promote_source.bl_idname, text="Vyrobit zdroj", icon="FILE_NEW").name = obj.name
             actions.operator(BB_OT_choose_source.bl_idname, icon="FILEBROWSER").name = obj.name
-            if bridge.has_override(context.scene.get(bridge.S_ROOT, ""), str(obj.get(bridge.P_SRC, ""))):
+            choice = bridge.source_choice(context.scene.get(bridge.S_ROOT, ""), str(obj.get(bridge.P_SRC, "")))
+            if choice == "personal":
+                note = layout.column(align=True)
+                note.alert = True
+                note.label(text="Zdroj je mimo projekt — jen u tebe.", icon="ERROR")
+                note.label(text="Ostatní v týmu ho nemají.")
+            if choice:
                 layout.operator(BB_OT_clear_source.bl_idname, icon="X").name = obj.name
         elif kind == "godot":
             layout.label(text="%s — z Godotu" % obj.name, icon="LOCKED")

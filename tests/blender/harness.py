@@ -59,6 +59,10 @@ class BridgeCase(unittest.TestCase):
         marker = os.path.join(PIPELINE, "bb_edit.json")
         if os.path.exists(marker):
             os.remove(marker)
+        shutil.rmtree(os.path.join(PIPELINE, "local"), ignore_errors=True)
+        pointer = os.path.join(bpy.utils.user_resource("CONFIG"), "blender_bridge_edit.json")
+        if os.path.exists(pointer):
+            os.remove(pointer)
         for name in os.listdir(ASSETS):
             path = os.path.join(ASSETS, name)
             if name.endswith((".blend", ".blend1", ".bbsrc")):

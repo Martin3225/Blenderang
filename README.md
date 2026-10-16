@@ -149,14 +149,25 @@ scenes/demo_scene/zviretice_zamek_whitebox/zviretice.glb     ← ve hře
 scenes/demo_scene/zviretice_zamek_whitebox/zviretice.blend   ← zdroj
 ```
 
-Když to nesedí (jeden `.blend` s víc modely, zdroj jinde), zapíše se přesná
-cesta do `<asset>.bbsrc` vedle assetu — jeden řádek, cesta relativně ke
-kořeni repa. Nastavuje se v Blenderu: **Detail ▸ Vybrat zdroj…** (prohlížeč
-souborů začne vedle assetu) a **Zrušit výběr zdroje**. Totéž umí
-`Project ▸ Tools ▸ Blender Bridge ▸ Vybrat zdrojový .blend pro výběr…`
-v Godotu. Zdroj musí ležet v projektu — soubor mimo repo by ostatní neměli.
-Platí pro všechny instance assetu. Centrální index záměrně neexistuje, byl
-by to zdroj merge konfliktů.
+Když to nesedí (jeden `.blend` s víc modely, zdroj jinde), vybere se zdroj
+ručně: v Blenderu **Detail ▸ Vybrat zdroj…** (prohlížeč souborů začne vedle
+assetu), v Godotu `Project ▸ Tools ▸ Blender Bridge ▸ Vybrat zdrojový .blend
+pro výběr…`. Platí pro všechny instance assetu.
+
+| kde leží vybraný `.blend` | kam se uloží | kdo ho vidí |
+|---|---|---|
+| v projektu | `<asset>.bbsrc` vedle assetu (cesta relativně ke kořeni) | celý tým přes git |
+| mimo projekt | `.pipeline/local/sources.json` (absolutní cesta) | **jen ty** |
+
+Zdroj mimo projekt je pro případ, kdy zdrojáky nemá každý. Blender i Godot
+na to po výběru upozorní a panel Detail to u modelu ukazuje červeně —
+ostatní ho neuvidí a model upravit nemůžou, uvidí dál jen `.glb`.
+`.pipeline/local/` má vlastní `.gitignore` s `*`, takže se nikdy necommitne
+a do týmového `.gitignore` není potřeba sahat.
+
+Pořadí: osobní výběr → `.bbsrc` → `.blend` vedle assetu. **Zrušit výběr
+zdroje** zruší nejdřív osobní výběr, pak sdílený. Centrální index záměrně
+neexistuje, byl by to zdroj merge konfliktů.
 
 | tier | geometrie | v Blenderu |
 |---|---|---|
@@ -227,7 +238,7 @@ z Terrain3D. `bounds` slouží jako záložní krabice, když `.glb` chybí.
 ## Testy
 
 ```sh
-python tests/run_tests.py                      # všechno (147 testů), ~35 s
+python tests/run_tests.py                      # všechno (160 testů), ~35 s
 python tests/run_tests.py --only blender       # jedna sada
 python tests/run_tests.py --regen-fixtures     # přegenerovat testovací scény
 ```
@@ -238,8 +249,9 @@ runner stáhne (zafixovaná verze 1.0.2) do `tests/.cache`. Pro GUI sadu na
 Linuxu `Xvfb`.
 
 Všechno běží v `tests/.work`: testovací projekt se zkopíruje a addon se do něj
-doplní z repa. Godot dostane vlastní konfigurační adresář, takže se nedotkne
-tvých editor settings, a Blender běží s `--factory-startup` bez tvých addonů.
+doplní z repa. Godot i Blender dostanou vlastní konfigurační adresáře, takže
+se nedotknou tvých nastavení, a Blender běží s `--factory-startup` bez tvých
+addonů.
 **Tvého herního projektu se testy nedotknou.**
 
 ### Testovací scény
@@ -276,7 +288,8 @@ tvých editor settings, a Blender běží s `--factory-startup` bez tvých addon
 | Automatické načtení, Ctrl+Z ve scéně, starý manifest po restartu | editor |
 | Vyrobit zdroj: `.blend` vedle assetu s exportem, všechny instance | blender, gui, e2e |
 | Upravit model: kontext, Ctrl+S přegeneruje `.glb`, kontext se neuloží | blender, gui |
-| `.bbsrc`, zdroj vedle assetu, poškozený zdroj; Vybrat / Zrušit zdroj v Blenderu | godot, blender |
+| `.bbsrc`, zdroj vedle assetu, poškozený zdroj; Vybrat / Zrušit zdroj | godot, blender |
+| Zdroj mimo projekt: osobní, neuloží se do repa, upozornění, úprava modelu | godot, blender, gui |
 | Děti modelů: hierarchie v Blenderu, posun s rodičem, smazání rodiče | godot, blender, e2e |
 | Panel v obou režimech, zaměření pohledu, dohled na terén | gui |
 

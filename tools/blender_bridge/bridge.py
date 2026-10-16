@@ -238,13 +238,17 @@ def _preview_collection(entry: dict[str, Any], root: str) -> bpy.types.Collectio
 
 
 def source_of(entry: dict[str, Any], root: str) -> str:
-    """Relativní cesta ke zdrojovému .blend, nebo prázdno.
+    """Cesta ke zdrojovému .blend (relativní k projektu, u osobního zdroje
+    absolutní), nebo prázdno.
 
-    Stejné pravidlo jako BBPaths v Godotu: přesná cesta v ``<asset>.bbsrc``,
-    jinak ``.blend`` vedle assetu. Blender ho vyhodnocuje sám, aby nově
-    vyrobený zdroj viděl hned, ne až po dalším exportu z Godotu.
+    Stejné pravidlo jako BBPaths v Godotu: osobní výběr (jen u tebe) →
+    ``<asset>.bbsrc`` (sdílený) → ``.blend`` vedle assetu. Blender ho
+    vyhodnocuje sám, aby nově vybraný zdroj viděl hned.
     """
     asset = entry.get("src", "")
+    personal = local_sources(root).get(asset, "")
+    if personal and os.path.isfile(personal):
+        return personal
     override = asset_abs(root, asset) + ".bbsrc"
     if os.path.isfile(override):
         with open(override, encoding="utf-8") as handle:
@@ -643,6 +647,15 @@ def _marker_path(root: str) -> str:
     return os.path.join(root, ".pipeline", EDIT_MARKER)
 
 
+def _pointer_path() -> str:
+    """Odkaz na rozpracovanou úpravu v uživatelské konfiguraci Blenderu.
+
+    Zdroj modelu může ležet mimo projekt (osobní zdroj), takže se značka
+    nedá najít procházením adresářů od otevřeného souboru.
+    """
+    return os.path.join(bpy.utils.user_resource("CONFIG", create=True), "blender_bridge_edit.json")
+
+
 def begin_edit(scene: bpy.types.Scene, obj: bpy.types.Object) -> str:
     """Odešle rozpracované přesuny do Godotu a připraví úpravu zdroje.
 
@@ -652,12 +665,13 @@ def begin_edit(scene: bpy.types.Scene, obj: bpy.types.Object) -> str:
     relative = obj.get(P_SRC_BLEND, "")
     if not root or not relative:
         raise BridgeError("asset nemá zdrojový .blend")
-    source = os.path.join(root, relative)
+    source = os.path.join(root, relative)   # osobní zdroj je absolutní
     if not os.path.isfile(source):
         raise BridgeError("zdroj neexistuje: %s" % source)
     manifest = stored_manifest_path(scene)
     export(scene)
-    with open(_marker_path(root), "w", encoding="utf-8") as handle:
+    marker = _marker_path(root)
+    with open(marker, "w", encoding="utf-8") as handle:
         json.dump({
             "manifest": manifest,
             "bb_id": str(obj.get(P_ID, "")),
@@ -665,32 +679,33 @@ def begin_edit(scene: bpy.types.Scene, obj: bpy.types.Object) -> str:
             "asset": str(obj.get(P_SRC, "")),
             "collection": obj.instance_collection.name if obj.instance_collection else "",
         }, handle)
+    with open(_pointer_path(), "w", encoding="utf-8") as handle:
+        json.dump({"marker": marker, "root": root}, handle)
     return source
 
 
 def edit_session() -> dict[str, Any] | None:
     """Údaje o rozpracované úpravě, pokud je otevřený právě její zdroj."""
-    if not bpy.data.filepath:
+    if not bpy.data.filepath or not os.path.isfile(_pointer_path()):
         return None
-    current = os.path.dirname(os.path.abspath(bpy.data.filepath))
-    while current and current != os.path.dirname(current):
-        marker = os.path.join(current, ".pipeline", EDIT_MARKER)
-        if os.path.isfile(marker):
-            with open(marker, "r", encoding="utf-8") as handle:
-                session = json.load(handle)
-            if _same_file(session.get("source", ""), bpy.data.filepath):
-                session["root"] = current
-                return session
-            return None
-        current = os.path.dirname(current)
-    return None
+    try:
+        with open(_pointer_path(), encoding="utf-8") as handle:
+            pointer = json.load(handle)
+        with open(pointer["marker"], encoding="utf-8") as handle:
+            session = json.load(handle)
+    except (OSError, ValueError, KeyError):
+        return None
+    if not _same_file(session.get("source", ""), bpy.data.filepath):
+        return None
+    session["root"] = pointer["root"]
+    return session
 
 
 def end_edit(session: dict[str, Any]) -> str:
     """Ukončí úpravu; vrátí manifest, ze kterého se má scéna znovu postavit."""
-    marker = _marker_path(session["root"])
-    if os.path.isfile(marker):
-        os.remove(marker)
+    for path in (_marker_path(session["root"]), _pointer_path()):
+        if os.path.isfile(path):
+            os.remove(path)
     return session["manifest"]
 
 
@@ -774,6 +789,14 @@ def setup_session_exporter(session: dict[str, Any]) -> str:
 # ------------------------------------------------------------------ detail
 
 
+def _source_label(obj: bpy.types.Object, tier: str, source: str) -> str:
+    if tier != "library":
+        return "není — vyrobí se %s" % expected_source(str(obj.get(P_SRC, "")))
+    if os.path.isabs(source):
+        return "%s (jen u tebe, mimo projekt)" % source
+    return source
+
+
 def describe(obj: bpy.types.Object) -> tuple[str, list[tuple[str, str]]]:
     """Co panel Detail ukáže o objektu: druh a řádky (popisek, hodnota).
 
@@ -787,7 +810,7 @@ def describe(obj: bpy.types.Object) -> tuple[str, list[tuple[str, str]]]:
             ("Node v Godotu", str(obj.get(P_PATH, ""))),
             ("Rodič", str(obj.get(P_PARENT, "."))),
             ("Asset", str(obj.get(P_SRC, "")).replace("res://", "", 1)),
-            ("Zdroj", source if tier == "library" else "není — vyrobí se %s" % expected_source(str(obj.get(P_SRC, "")))),
+            ("Zdroj", _source_label(obj, tier, source)),
             ("Id", str(obj.get(P_ID, ""))),
         ]
         return "model", rows
@@ -808,51 +831,104 @@ def override_path(root: str, asset_src: str) -> str:
     return asset_abs(root, asset_src) + ".bbsrc"
 
 
-def has_override(root: str, asset_src: str) -> bool:
-    return os.path.isfile(override_path(root, asset_src))
+# Osobní výběr zdrojů mimo projekt. Stejný soubor čte Godot (BBPaths).
+# Adresář má .gitignore s „*“, takže se nikdy necommitne.
+LOCAL_DIR = os.path.join(".pipeline", "local")
+LOCAL_SOURCES = os.path.join(LOCAL_DIR, "sources.json")
+
+
+def local_sources(root: str) -> dict[str, str]:
+    path = os.path.join(root, LOCAL_SOURCES)
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_local(root: str, asset_src: str, path: str) -> None:
+    sources = local_sources(root)
+    if path:
+        sources[asset_src] = path
+    else:
+        sources.pop(asset_src, None)
+    directory = os.path.join(root, LOCAL_DIR)
+    os.makedirs(directory, exist_ok=True)
+    ignore = os.path.join(directory, ".gitignore")
+    if not os.path.isfile(ignore):
+        with open(ignore, "w", encoding="utf-8") as handle:
+            handle.write("*\n")
+    with open(os.path.join(root, LOCAL_SOURCES), "w", encoding="utf-8") as handle:
+        json.dump(sources, handle, indent="\t")
+
+
+def source_choice(root: str, asset_src: str) -> str:
+    """Jak je zdroj zvolený: ``personal`` (jen u tebe), ``shared`` (.bbsrc),
+    nebo prázdno (konvence: .blend vedle assetu)."""
+    if asset_src in local_sources(root):
+        return "personal"
+    if os.path.isfile(override_path(root, asset_src)):
+        return "shared"
+    return ""
 
 
 def _models_of(scene: bpy.types.Scene, asset_src: str) -> list[bpy.types.Object]:
     return [o for o in scene_models(scene) if o.get(P_SRC) == asset_src]
 
 
-def choose_source(scene: bpy.types.Scene, asset_src: str, blend_path: str) -> str:
+def choose_source(scene: bpy.types.Scene, asset_src: str, blend_path: str) -> tuple[str, bool]:
     """Nastaví existující .blend jako zdroj assetu a přepojí všechny jeho
-    instance. Cesta se uloží do ``.bbsrc`` relativně ke kořeni projektu —
-    soubor proto musí být uvnitř projektu, jinak by ho ostatní nenašli."""
+    instance. Vrací (cesta, osobní).
+
+    V projektu se uloží do sdíleného ``.bbsrc`` (relativně ke kořeni).
+    Mimo projekt se uloží jen u tebe — ostatní v týmu ho neuvidí.
+    """
     root = scene.get(S_ROOT, "")
     if not root:
         raise BridgeError("scéna nemá načtený manifest")
-    if not os.path.isfile(blend_path) or not blend_path.lower().endswith(".blend"):
+    absolute = os.path.abspath(blend_path)
+    if not os.path.isfile(absolute) or not absolute.lower().endswith(".blend"):
         raise BridgeError("vyber existující .blend soubor")
-    relative = os.path.relpath(os.path.abspath(blend_path), root)
-    if relative.startswith(".."):
-        raise BridgeError("zdroj musí ležet v projektu (%s), jinak ho ostatní nenajdou" % root)
-    relative = relative.replace(os.sep, "/")
+    try:
+        relative = os.path.relpath(absolute, root)
+    except ValueError:   # Windows: jiný disk než projekt
+        relative = absolute
+    personal = relative.startswith("..") or os.path.isabs(relative)
 
     stem = os.path.basename(asset_src).rsplit(".", 1)[0]
-    collection = _link_library_collection(os.path.join(root, relative), stem)
-    marker = override_path(root, asset_src)
-    if relative == expected_source(asset_src):
-        if os.path.isfile(marker):
-            os.remove(marker)
+    collection = _link_library_collection(absolute, stem)
+    if personal:
+        stored = absolute
+        _write_local(root, asset_src, absolute)
     else:
-        with open(marker, "w", encoding="utf-8") as handle:
-            handle.write(relative)
+        stored = relative.replace(os.sep, "/")
+        marker = override_path(root, asset_src)
+        if stored == expected_source(asset_src):
+            if os.path.isfile(marker):
+                os.remove(marker)
+        else:
+            with open(marker, "w", encoding="utf-8") as handle:
+                handle.write(stored)
+        if asset_src in local_sources(root):
+            _write_local(root, asset_src, "")
     for obj in _models_of(scene, asset_src):
         obj.instance_collection = collection
         obj[P_TIER] = "library"
-        obj[P_SRC_BLEND] = relative
-    return relative
+        obj[P_SRC_BLEND] = stored
+    return stored, personal
 
 
 def clear_source(scene: bpy.types.Scene, asset_src: str) -> None:
-    """Zruší ručně vybraný zdroj; platí zase konvence (.blend vedle assetu),
-    jinak náhled z .glb."""
+    """Zruší ručně vybraný zdroj — nejdřív osobní, pak sdílený. Platí zase
+    to, co zbylo: sdílený .bbsrc, .blend vedle assetu, jinak náhled z .glb."""
     root = scene.get(S_ROOT, "")
-    marker = override_path(root, asset_src)
-    if os.path.isfile(marker):
-        os.remove(marker)
+    if source_choice(root, asset_src) == "personal":
+        _write_local(root, asset_src, "")
+    elif os.path.isfile(override_path(root, asset_src)):
+        os.remove(override_path(root, asset_src))
     for obj in _models_of(scene, asset_src):
         entry = {"name": obj.name, "src": asset_src}
         collection, relative = _resolve_source(entry, root)

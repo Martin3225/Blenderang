@@ -244,53 +244,99 @@ class HierarchyTest(BridgeCase):
 
 
 class ChooseSourceTest(BridgeCase):
-    def test_choose_source_anywhere_in_project(self):
-        source = os.path.join(harness.PROJECT, "fixtures", "shared_props.blend")
+    CRATE = "res://fixtures/assets/crate.glb"
+
+    def shared(self) -> str:
         write_source("../shared_props.blend", "props_library")
+        return os.path.join(harness.PROJECT, "fixtures", "shared_props.blend")
+
+    def outside(self) -> str:
+        """Zdroj mimo projekt — třeba osobní složka grafika."""
+        path = os.path.join(os.path.dirname(harness.PROJECT), "outside_sources", "crate_master.blend")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        write_source(os.path.relpath(path, harness.ASSETS), "crate_master")
+        self.addCleanup(lambda: os.path.exists(path) and os.remove(path))
+        return path
+
+    def test_source_in_project_is_shared(self):
+        source = self.shared()
+        self.addCleanup(os.remove, source)
         scene = self.open_scene()
-        relative = bridge.choose_source(scene, "res://fixtures/assets/crate.glb", source)
-        self.assertEqual(relative, "fixtures/shared_props.blend")
+        path, personal = bridge.choose_source(scene, self.CRATE, source)
+        self.assertEqual((path, personal), ("fixtures/shared_props.blend", False))
         with open(os.path.join(harness.ASSETS, "crate.glb.bbsrc"), encoding="utf-8") as handle:
             self.assertEqual(handle.read(), "fixtures/shared_props.blend", "Godot čte stejný soubor")
         for name in ("Crate", "InRotated", "Detached"):
             obj = bpy.data.objects[name]
             self.assertEqual(obj.get(bridge.P_TIER), "library", name)
             self.assertIsNotNone(obj.instance_collection.library, name)
-        os.remove(source)
+        self.assertEqual(bridge.source_choice(harness.PROJECT, self.CRATE), "shared")
 
-    def test_chosen_source_survives_reload(self):
-        source = os.path.join(harness.PROJECT, "fixtures", "shared_props.blend")
-        write_source("../shared_props.blend", "props_library")
+    def test_source_outside_project_is_personal(self):
+        source = self.outside()
         scene = self.open_scene()
-        bridge.choose_source(scene, "res://fixtures/assets/crate.glb", source)
+        path, personal = bridge.choose_source(scene, self.CRATE, source)
+        self.assertTrue(personal)
+        self.assertEqual(path, source)
+        self.assertFalse(os.path.exists(os.path.join(harness.ASSETS, "crate.glb.bbsrc")), "do projektu se nic sdíleného nezapíše")
+        self.assertEqual(bridge.local_sources(harness.PROJECT), {self.CRATE: source})
+        with open(os.path.join(harness.PIPELINE, "local", ".gitignore"), encoding="utf-8") as handle:
+            self.assertEqual(handle.read().strip(), "*", "osobní výběr se nikdy necommitne")
+        self.assertIsNotNone(bpy.data.objects["Crate"].instance_collection.library)
+        self.assertEqual(bridge.source_choice(harness.PROJECT, self.CRATE), "personal")
+        self.assertIn("jen u tebe", dict(bridge.describe(bpy.data.objects["Crate"])[1])["Zdroj"])
+
+    def test_personal_source_wins_and_survives_reload(self):
+        shared = self.shared()
+        self.addCleanup(os.remove, shared)
+        personal = self.outside()
+        scene = self.open_scene()
+        bridge.choose_source(scene, self.CRATE, shared)
+        bridge.choose_source(scene, self.CRATE, personal)
         bpy.ops.bb.rebuild()
-        self.assertEqual(bpy.data.objects["Crate"].get(bridge.P_SRC_BLEND), "fixtures/shared_props.blend")
-        os.remove(source)
+        self.assertEqual(bpy.data.objects["Crate"].get(bridge.P_SRC_BLEND), personal)
+        self.assertTrue(os.path.exists(os.path.join(harness.ASSETS, "crate.glb.bbsrc")), "sdílený výběr ostatních zůstal")
 
-    def test_source_outside_project_is_refused(self):
-        outside = os.path.join(os.path.dirname(harness.PROJECT), "outside.blend")
-        bpy.data.libraries.write(outside, set(), fake_user=True)
+    def test_clear_personal_falls_back_to_shared(self):
+        shared = self.shared()
+        self.addCleanup(os.remove, shared)
+        personal = self.outside()
         scene = self.open_scene()
-        with self.assertRaisesRegex(bridge.BridgeError, "v projektu"):
-            bridge.choose_source(scene, "res://fixtures/assets/crate.glb", outside)
-        self.assertFalse(os.path.exists(os.path.join(harness.ASSETS, "crate.glb.bbsrc")))
-        os.remove(outside)
+        bridge.choose_source(scene, self.CRATE, shared)
+        bridge.choose_source(scene, self.CRATE, personal)
+        bridge.clear_source(scene, self.CRATE)
+        self.assertEqual(bpy.data.objects["Crate"].get(bridge.P_SRC_BLEND), "fixtures/shared_props.blend")
+        self.assertEqual(bridge.local_sources(harness.PROJECT), {})
+
+    def test_choosing_inside_project_drops_personal_choice(self):
+        shared = self.shared()
+        self.addCleanup(os.remove, shared)
+        personal = self.outside()
+        scene = self.open_scene()
+        bridge.choose_source(scene, self.CRATE, personal)
+        bridge.choose_source(scene, self.CRATE, shared)
+        self.assertEqual(bridge.local_sources(harness.PROJECT), {})
+        self.assertEqual(bridge.source_choice(harness.PROJECT, self.CRATE), "shared")
 
     def test_choosing_sibling_needs_no_marker(self):
         source = write_source("crate.blend", "crate")
         scene = self.open_scene()
-        self.assertEqual(bridge.choose_source(scene, "res://fixtures/assets/crate.glb", source), "fixtures/assets/crate.blend")
+        self.assertEqual(bridge.choose_source(scene, self.CRATE, source), ("fixtures/assets/crate.blend", False))
         self.assertFalse(os.path.exists(os.path.join(harness.ASSETS, "crate.glb.bbsrc")))
 
     def test_clear_source_returns_to_preview(self):
-        source = os.path.join(harness.PROJECT, "fixtures", "shared_props.blend")
-        write_source("../shared_props.blend", "props_library")
+        source = self.shared()
+        self.addCleanup(os.remove, source)
         scene = self.open_scene()
-        bridge.choose_source(scene, "res://fixtures/assets/crate.glb", source)
-        bridge.clear_source(scene, "res://fixtures/assets/crate.glb")
+        bridge.choose_source(scene, self.CRATE, source)
+        bridge.clear_source(scene, self.CRATE)
         self.assertFalse(os.path.exists(os.path.join(harness.ASSETS, "crate.glb.bbsrc")))
         crate = bpy.data.objects["Crate"]
         self.assertEqual(crate.get(bridge.P_TIER), "none")
         self.assertIsNotNone(crate.instance_collection)
         self.assertIsNone(crate.instance_collection.library)
-        os.remove(source)
+
+    def test_rejects_non_blend(self):
+        scene = self.open_scene()
+        with self.assertRaises(bridge.BridgeError):
+            bridge.choose_source(scene, self.CRATE, os.path.join(harness.ASSETS, "crate.glb"))
