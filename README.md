@@ -238,7 +238,7 @@ z Terrain3D. `bounds` slouží jako záložní krabice, když `.glb` chybí.
 ## Testy
 
 ```sh
-python tests/run_tests.py                      # všechno (160 testů), ~35 s
+python tests/run_tests.py                      # všechno (158 testů), ~35 s
 python tests/run_tests.py --only blender       # jedna sada
 python tests/run_tests.py --regen-fixtures     # přegenerovat testovací scény
 ```
