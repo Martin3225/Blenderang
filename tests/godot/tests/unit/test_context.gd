@@ -190,5 +190,41 @@ func test_terrain_bake_is_cached() -> void:
 	done()
 
 
+## Vzdálenost vrcholů z Project Settings; mesh se bere z cache, dokud se
+## nastavení nezmění.
+func test_terrain_resolution_follows_setting() -> void:
+	if not ClassDB.class_exists("Terrain3D"):
+		skip("Terrain3D není nainstalovaný")
+		return
+	clear_pipeline()
+	var root: Node = await _terrain_root()
+	var terrain: Node3D = root.get_node("Nav/Terrain3D")
+	var base: String = "res://.pipeline/resolution_test"
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://.pipeline"))
+	ProjectSettings.set_setting(BBTerrain.SETTING_SPACING, 4)
+	# Terén 256 m: po 4 m 65 × 65 vrcholů.
+	eq(_vertex_count(BBTerrain.terrain_mesh(terrain, base)), 65 * 65, "vrchol každé 4 m")
+
+	var fake: ArrayMesh = ArrayMesh.new()
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = PackedVector3Array([Vector3.ZERO, Vector3.RIGHT, Vector3.FORWARD])
+	fake.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	ResourceSaver.save(fake, base + ".terrain.res")
+	eq(_vertex_count(BBTerrain.terrain_mesh(terrain, base)), 3, "beze změny se vezme mesh z cache")
+
+	ProjectSettings.set_setting(BBTerrain.SETTING_SPACING, 16)
+	eq(_vertex_count(BBTerrain.terrain_mesh(terrain, base)), 17 * 17, "po změně nastavení se peče znovu, po 16 m")
+	ProjectSettings.set_setting(BBTerrain.SETTING_SPACING, 1)
+	eq(_vertex_count(BBTerrain.terrain_mesh(terrain, base)), 257 * 257, "plné rozlišení po 1 m")
+	ProjectSettings.set_setting(BBTerrain.SETTING_SPACING, BBTerrain.DEFAULT_SPACING)
+	done()
+
+
+func _vertex_count(mesh: Mesh) -> int:
+	return (mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX] as PackedVector3Array).size() if mesh else -1
+
+
+
 func _vec(color: Color) -> Vector3:
 	return Vector3(color.r, color.g, color.b)

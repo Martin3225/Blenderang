@@ -122,7 +122,7 @@ V outlineru:
   potomkem: posun rodiče posune i děti. Když v Blenderu smažeš rodiče a děti
   necháš, v Godotu se přesunou pod nejbližšího předka.
 - `BB_Locked` — skutečná geometrie všeho ostatního ze scény: postavy, budovy,
-  terén (z Terrain3D, vrchol každých 16 m, s upečenou barvou), spawnpointy
+  terén (z Terrain3D, s upečenou barvou, rozlišení viz [Rozlišení terénu](#rozlišení-terénu)), spawnpointy
   a markery jako osy
   velké 1 m, světla. Jde vybrat
   a zaměřit (`numpad .`), ale ne posunout — změny by se do Godotu stejně
@@ -245,16 +245,43 @@ auto shader stejným vzorcem jako Terrain3D (`auto_slope`, `auto_height_reductio
 `auto_base/overlay_texture`) — vynásobená barevnou mapou. Výsledek vypadá jako
 plochá satelitní mapa bez osvětlení a makrovariace, na rozmisťování stačí.
 
-Textura má 1024 px na delší straně (u 8 × 4 km terénu 7,5 m/px), pečení trvá
-asi 3 s. Ukládá se do `.pipeline/<scéna>.terrain.png` a znovu se počítá, jen
-když se změní data terénu, textury nebo parametry auto shaderu.
+Ukládá se do `.pipeline/<scéna>.terrain.png` a znovu se počítá, jen když se
+změní data terénu, textury, parametry auto shaderu nebo rozlišení.
+
+### Rozlišení terénu
+
+`Project Settings ▸ Blender Bridge ▸ Terrain`. Platí pro celý tým; dokud je
+hodnota výchozí, do `project.godot` se nic nezapíše.
+
+| nastavení | výchozí | možnosti |
+|---|---|---|
+| `mesh_spacing_m` — vzdálenost vrcholů | 8 m | 1, 2, 4, 8, 16, 32 m |
+| `texture_size` — delší strana barvy | 2048 px | 1024 – 8192 px |
+
+Vzdálenost se zaokrouhlí na mocninu dvou `vertex_spacing` terénu (LOD
+`bake_mesh`). Mesh i textura se ukládají do `.pipeline/<scéna>.terrain.res`
+/ `.terrain.png` a pečou se znovu jen po změně terénu nebo nastavení — další
+otevření v Blenderu je rychlé.
+
+Orientačně pro terén 7,7 × 4 km (změřeno ~6 µs na vrchol, ~2,7 µs na pixel,
+jen první pečení; čas glTF exportu a importu v Blenderu navíc):
+
+| vrchol | vrcholů | pečení |
+|---|---|---|
+| 16 m | 120 tisíc | < 1 s |
+| 8 m | 480 tisíc | 3 s |
+| 4 m | 1,9 milionu | 12 s |
+| 2 m | 7,7 milionu | 45 s |
+
+Nad 4 miliony vrcholů Godot upozorní. Textura 4096 px se peče asi 45 s,
+8192 px asi 3 minuty.
 
 ---
 
 ## Testy
 
 ```sh
-python tests/run_tests.py                      # všechno (172 testů), ~40 s
+python tests/run_tests.py                      # všechno (173 testů), ~40 s
 python tests/run_tests.py --only blender       # jedna sada
 python tests/run_tests.py --regen-fixtures     # přegenerovat testovací scény
 ```
@@ -309,6 +336,7 @@ addonů.
 | Zdroj mimo projekt: osobní, neuloží se do repa, upozornění, úprava modelu | godot, blender, gui |
 | Děti modelů: hierarchie v Blenderu, posun s rodičem, smazání rodiče | godot, blender, e2e |
 | Materiál terénu: control mapa, auto shader, barevná mapa, cache | godot, blender |
+| Rozlišení terénu z Project Settings, cache meshe | godot |
 | Hledání v seznamu modelů | blender, gui |
 | Panel v obou režimech, zaměření pohledu, dohled na terén | gui |
 
@@ -377,7 +405,7 @@ Zatím neimplementováno.
 
 **Proč ne celý terén najednou.** Terrain3D má výšku po 1 m; terén 7,7 × 4 km
 je 31 milionů vzorků. Takový mesh Blender v sculpt módu neutáhne a do kontextu
-jde terén záměrně po 16 m.
+jde terén ve výchozím nastavení po 8 m.
 
 **Návrh: úprava výřezu.**
 

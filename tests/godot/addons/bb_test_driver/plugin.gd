@@ -150,7 +150,7 @@ func _phase_reimport(bridge: EditorPlugin) -> void:
 	var blend: FileAccess = FileAccess.open("res://fixtures/assets/crate.blend", FileAccess.WRITE)
 	blend.store_string("BLENDER")
 	blend.close()
-	await _reimport()
+	await _reimport(asset)
 
 	var root: Node = EditorInterface.get_edited_scene_root()
 	var crate: Node = root.get_node_or_null("Nav/CrateOnHill")
@@ -172,13 +172,14 @@ func _phase_reimport(bridge: EditorPlugin) -> void:
 	file.store_buffer(original)
 	file.close()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path("res://fixtures/assets/crate.blend"))
-	await _reimport()
+	await _reimport(asset)
 
 
-func _reimport() -> void:
-	var filesystem: EditorFileSystem = EditorInterface.get_resource_filesystem()
-	filesystem.scan()
-	await filesystem.resources_reimported
+## Reimport natvrdo: scan() by změnu ve stejné sekundě (stejný mtime)
+## přehlédl a čekání by nikdy neskončilo. Jde přes stejné signály jako
+## reimport po uložení z Blenderu.
+func _reimport(asset: String) -> void:
+	EditorInterface.get_resource_filesystem().reimport_files(PackedStringArray([asset]))
 	for _frame: int in 30:
 		await get_tree().process_frame
 
