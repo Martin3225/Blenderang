@@ -92,6 +92,25 @@ func test_terrain_is_baked_in_world_space() -> void:
 	done()
 
 
+## Terén pod NavigationRegion3D, ve kterém není žádný model (všechno
+## neoznačené). Nav je jako proxy jeden celek, terén ale musí dostat vlastní
+## záznam — vnitřní meshe Terrain3D nemají ownera a do celku Nav se nedostanou.
+func test_terrain_under_unmarked_parent_is_kept() -> void:
+	if not ClassDB.class_exists("Terrain3D"):
+		skip("Terrain3D není nainstalovaný")
+		return
+	clear_pipeline()
+	var root: Node = scene("terrain")
+	await tree.process_frame
+	var manifest: Dictionary = BBManifest.export_scene(root)
+	eq(entry(manifest, "Terrain3D").get("kind"), "terrain", "terén má záznam")
+	BBManifest.write(root)
+	var context: Node = _load_context("res://.pipeline/terrain.context.glb")
+	eq(_meshes(context.find_child("Terrain3D", true, false)).size(), 1, "terén v kontextu")
+	eq(_meshes(context).size(), 2, "terén a krabice, nic dvakrát")
+	done()
+
+
 func _terrain_root() -> Node:
 	var root: Node = scene("terrain")
 	await tree.process_frame

@@ -33,6 +33,8 @@ var _watch: Timer
 ## Poslední obsah manifestu, o kterém plugin ví (zapsal ho sám, nebo ho už
 ## naimportoval). Jiný obsah na disku znamená změnu z Blenderu.
 var _known_md5: Dictionary = {}
+## Značky nodů otevřených scén z okamžiku před reimportem, podle cesty scény.
+var _marks_before_reimport: Dictionary = {}
 
 
 func _enter_tree() -> void:
@@ -71,6 +73,10 @@ func _enter_tree() -> void:
 	add_child(_watch)
 	_watch.start()
 
+	var filesystem: EditorFileSystem = EditorInterface.get_resource_filesystem()
+	filesystem.resources_reimporting.connect(_on_reimporting)
+	filesystem.resources_reimported.connect(_on_reimported)
+
 
 func _exit_tree() -> void:
 	remove_tool_menu_item(MENU_NAME)
@@ -81,6 +87,9 @@ func _exit_tree() -> void:
 	for menu: EditorContextMenuPlugin in _context_menus:
 		remove_context_menu_plugin(menu)
 	_context_menus.clear()
+	var filesystem: EditorFileSystem = EditorInterface.get_resource_filesystem()
+	filesystem.resources_reimporting.disconnect(_on_reimporting)
+	filesystem.resources_reimported.disconnect(_on_reimported)
 	_watch.queue_free()
 	_watch = null
 
@@ -240,6 +249,32 @@ func _export(root: Node) -> String:
 	_known_md5[path] = FileAccess.get_md5(path)
 	print("Blender Bridge: manifest zapsán do %s" % path)
 	return path
+
+
+## Uložení zdroje v Blenderu přegeneruje .glb a Godot ho reimportuje. Instance
+## v otevřených scénách přitom nahradí novými nody bez metadat — model by
+## přestal být v Blenderu upravitelný a nadřazený node (NavigationRegion3D)
+## by spolkl i terén. Značky se proto před reimportem zapamatují a po něm
+## vrátí.
+func _on_reimporting(_resources: PackedStringArray) -> void:
+	_marks_before_reimport.clear()
+	for root: Node in EditorInterface.get_open_scene_roots():
+		if not root.scene_file_path.is_empty():
+			_marks_before_reimport[root.scene_file_path] = BBOwnership.snapshot_marks(root)
+
+
+func _on_reimported(_resources: PackedStringArray) -> void:
+	# Editor scény znovu sestaví až po tomhle signálu.
+	_restore_marks.call_deferred()
+
+
+func _restore_marks() -> void:
+	for root: Node in EditorInterface.get_open_scene_roots():
+		var marks: Dictionary = _marks_before_reimport.get(root.scene_file_path, {})
+		var restored: int = BBOwnership.restore_marks(root, marks)
+		if restored > 0:
+			print("Blender Bridge: po reimportu vráceno označení %d nodů ve scéně %s." % [restored, root.scene_file_path.get_file()])
+	_marks_before_reimport.clear()
 
 
 ## Změny z Blenderu se načtou samy: Blender po „Odeslat do Godotu“ přepíše

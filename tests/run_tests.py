@@ -277,12 +277,15 @@ def suite_blender(tools: Tools) -> list[dict]:
 def suite_editor(tools: Tools) -> list[dict]:
     results: list[dict] = []
     env = {"BB_FAKE_BLENDER": str(fake_blender()), "BB_TEST_OUT": str(OUT)}
-    for phase in ("open_and_watch", "restart", "context_menu"):
+    phases = (
+        ("open_and_watch", "basic"), ("restart", "basic"), ("context_menu", "basic"), ("reimport", "terrain"),
+    )
+    for phase, scene in phases:
         if phase == "restart":
             # Simulace práce v Blenderu, zatímco Godot neběžel.
             _move_in_manifest(PROJECT / ".pipeline" / "basic.json", "Crate", (9.0, 0.0, 3.0))
         out = OUT / f"editor_{phase}.json"
-        tools.godot_editor(f"editor_{phase}", "res://fixtures/scenes/basic.tscn",
+        tools.godot_editor(f"editor_{phase}", f"res://fixtures/scenes/{scene}.tscn",
                            {**env, "BB_TEST_EDITOR": phase})
         results += results_from(out, "editor", f"editor_{phase}.log")
     return results

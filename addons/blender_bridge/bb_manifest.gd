@@ -107,20 +107,25 @@ static func _visit(node: Node, root: Node, walk: Walk) -> void:
 		return
 	walk.nodes.append(_proxy_entry(node as Node3D, root))
 	# Proxy se dál nerozbaluje, ale spravované objekty uvnitř (např. budova
-	# zavěšená pod NavigationRegion3D) se najít musí.
-	if _contains_owned(node):
+	# zavěšená pod NavigationRegion3D) se najít musí. Terén taky — jeho meshe
+	# jsou interní nody bez ownera a do geometrie rodiče se nedostanou.
+	if _contains_own_entries(node):
 		_walk_children(node, root, walk)
 
 
-static func _contains_owned(node: Node) -> bool:
+static func _contains_own_entries(node: Node) -> bool:
 	var stack: Array[Node] = [node]
 	while not stack.is_empty():
 		var current: Node = stack.pop_back()
 		for child: Node in current.get_children():
-			if BBOwnership.is_blender_owned(child):
+			if BBOwnership.is_blender_owned(child) or _is_terrain(child):
 				return true
 			stack.push_back(child)
 	return false
+
+
+static func _is_terrain(node: Node) -> bool:
+	return node.has_method("get_data_directory")
 
 
 ## Organizační Node3D bez skriptu, bez instance a bez vlastního obsahu
@@ -172,7 +177,7 @@ static func _proxy_entry(node: Node3D, root: Node) -> Dictionary:
 	}
 	if not node.scene_file_path.is_empty():
 		entry["src"] = node.scene_file_path
-	if node.has_method("get_data_directory"):
+	if _is_terrain(node):
 		entry["kind"] = "terrain"
 		entry["data_directory"] = node.get("data_directory")
 	if not node.visible:

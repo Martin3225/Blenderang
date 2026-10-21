@@ -254,7 +254,7 @@ když se změní data terénu, textury nebo parametry auto shaderu.
 ## Testy
 
 ```sh
-python tests/run_tests.py                      # všechno (165 testů), ~40 s
+python tests/run_tests.py                      # všechno (172 testů), ~40 s
 python tests/run_tests.py --only blender       # jedna sada
 python tests/run_tests.py --regen-fixtures     # přegenerovat testovací scény
 ```
@@ -304,6 +304,7 @@ addonů.
 | Automatické načtení, Ctrl+Z ve scéně, starý manifest po restartu | editor |
 | Vyrobit zdroj: `.blend` vedle assetu s exportem, všechny instance | blender, gui, e2e |
 | Upravit model: kontext, Ctrl+S přegeneruje `.glb`, kontext se neuloží | blender, gui |
+| Reimport `.glb` po Ctrl+S ve zdroji: model zůstane označený, terén v kontextu | editor, godot |
 | `.bbsrc`, zdroj vedle assetu, poškozený zdroj; Vybrat / Zrušit zdroj | godot, blender |
 | Zdroj mimo projekt: osobní, neuloží se do repa, upozornění, úprava modelu | godot, blender, gui |
 | Děti modelů: hierarchie v Blenderu, posun s rodičem, smazání rodiče | godot, blender, e2e |
@@ -315,7 +316,7 @@ Netestováno na Windows (runner tam GUI sadu přeskočí).
 
 ### Co testy našly
 
-Při psaní testů a ostrém použití se ukázalo třináct chyb, všechny opravené
+Při psaní testů a ostrém použití se ukázalo patnáct chyb, všechny opravené
 a pokryté testem:
 
 - **Děti modelu (výstroj na `armature_f`) se do Blenderu vůbec nedostaly** —
@@ -346,6 +347,12 @@ a pokryté testem:
   `.glb` přišly o geometrii.
 - **Odeslání ze skriptu posílalo starou pozici** (nepřepočtená matice).
 - **Poškozený `.blend` vedle assetu shodil otevření celé scény.**
+- **Po úpravě modelu přestal být model upravitelný a zmizel terén.** Godot
+  při reimportu `.glb` nahradí instance v otevřené scéně novými nody a zahodí
+  jim metadata, takže `bb_id` zmizelo (a další otevření v Blenderu to uložilo).
+  Plugin si teď značky před reimportem zapamatuje a vrátí.
+- **Terén pod `NavigationRegion3D` bez modelu se do Blenderu nedostal** —
+  rodič šel jako jeden celek a vnitřní meshe Terrain3D nemají ownera.
 
 ---
 

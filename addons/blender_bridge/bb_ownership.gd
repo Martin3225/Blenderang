@@ -9,6 +9,8 @@ extends RefCounted
 const META_ID: StringName = &"bb_id"
 const META_PINNED: StringName = &"bb_pinned"
 const META_ROOT: StringName = &"bb_root"
+## Všechna metadata mostu na nodu.
+const MARKS: Array[StringName] = [META_ID, META_PINNED, META_ROOT]
 
 ## Přípony zdrojů, které jsou typicky autorované v Blenderu. Slouží jen
 ## jako nápověda pro hromadné označování, ne jako kritérium vlastnictví.
@@ -89,3 +91,39 @@ static func collect_ids(root: Node, duplicates: Array[Node]) -> Dictionary:
 		for child: Node in node.get_children():
 			stack.push_back(child)
 	return taken
+
+
+## Značky všech nodů scény podle cesty od kořene. Godot při reimportu assetu
+## nahradí jeho instance v otevřené scéně novými nody a metadata instance
+## přitom zahodí — tímhle se dají vrátit, viz [method restore_marks].
+static func snapshot_marks(root: Node) -> Dictionary:
+	var marks: Dictionary = {}
+	var stack: Array[Node] = [root]
+	while not stack.is_empty():
+		var node: Node = stack.pop_back()
+		var meta: Dictionary = {}
+		for key: StringName in MARKS:
+			if node.has_meta(key):
+				meta[key] = node.get_meta(key)
+		if not meta.is_empty():
+			marks[root.get_path_to(node)] = {"src": node.scene_file_path, "meta": meta}
+		for child: Node in node.get_children():
+			stack.push_back(child)
+	return marks
+
+
+## Vrátí značky nodům, které o ně přišly. Node se musí shodovat cestou
+## i assetem; kdo nějakou značku má, je nedotčený. Vrací počet opravených nodů.
+static func restore_marks(root: Node, marks: Dictionary) -> int:
+	var restored: int = 0
+	for path: NodePath in marks:
+		var node: Node = root.get_node_or_null(path)
+		var record: Dictionary = marks[path]
+		if node == null or node.scene_file_path != record["src"]:
+			continue
+		if MARKS.any(func(key: StringName) -> bool: return node.has_meta(key)):
+			continue
+		for key: StringName in record["meta"]:
+			node.set_meta(key, record["meta"][key])
+		restored += 1
+	return restored
