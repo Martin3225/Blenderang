@@ -1,4 +1,4 @@
-"""Blender Bridge: lay out Godot scenes and edit their models in Blender.
+"""Blenderang: lay out Godot scenes and edit their models in Blender.
 
 Two modes:
 
@@ -391,7 +391,7 @@ class BB_Preferences(bpy.types.AddonPreferences):
         layout = self.layout
         layout.label(text="Default .glb export for sources", icon="EXPORT")
         layout.label(text="Applies to new sources and to sources that don't have their own settings yet.")
-        layout.label(text="A specific model is set up in the Bridge panel while editing it.")
+        layout.label(text="A specific model is set up in the Blenderang panel while editing it.")
         _draw_export_options(layout, self)
 
 
@@ -442,10 +442,10 @@ _HANDLERS = (
 
 
 class BB_PT_panel(bpy.types.Panel):
-    bl_label = "Blender Bridge"
+    bl_label = "Blenderang"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Bridge"
+    bl_category = "Blenderang"
 
     def draw(self, context: bpy.types.Context) -> None:
         session = bridge.edit_session()
@@ -527,7 +527,7 @@ class BB_PT_detail(bpy.types.Panel):
     bl_label = "Detail"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Bridge"
+    bl_category = "Blenderang"
     bl_parent_id = "BB_PT_panel"
 
     @classmethod

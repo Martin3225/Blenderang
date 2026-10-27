@@ -1,462 +1,297 @@
-# Blender Bridge
+<p align="center">
+  <img src="docs/icon.png" width="128" alt="Blenderang icon">
+</p>
 
-Rozmisťování objektů Godot scény v Blenderu a zpět. Přenáší se jen identity
-a transformace, nikdy geometrie — ta zůstává v `.glb` (pro hru) a volitelně
-v `.blend` (zdroj pro úpravy).
+<h1 align="center">Blenderang</h1>
 
-Cíl: Godot 4.7, Blender 5.2, priorita Windows.
+<p align="center">
+  <b>Throw your Godot scene into Blender. Catch it back.</b><br>
+  Open your Godot scene in Blender with one click, move things around and reshape models,<br>
+  then send it all straight back to Godot.
+</p>
 
-```
-addons/blender_bridge/   Godot editor plugin
-tools/blender_bridge/    Blender extension
-```
+<p align="center">
+  <img src="https://img.shields.io/badge/Godot-4.7-478cbf?logo=godotengine&logoColor=white" alt="Godot 4.7">
+  <img src="https://img.shields.io/badge/Blender-5.2-e87d0d?logo=blender&logoColor=white" alt="Blender 5.2">
+  <img src="https://img.shields.io/badge/license-MIT%20%2B%20GPL--3.0-green" alt="License">
+</p>
 
----
-
-## Pro tým: co se mění
-
-**Kdo nepoužívá Blender, nemusí dělat nic.**
-
-- Hra dál používá jen `.glb` / `.fbx`. Projekt jde otevřít bez Blenderu.
-- `project.godot` má `filesystem/import/blender/enabled=false`, takže Godot
-  `.blend` soubory ignoruje, ať leží kdekoli. **Nezapínat** — jinak začne
-  projekt na strojích bez Blenderu hlásit chyby.
-- Scény se mění jen o metadatum `bb_id` na nodech, které jdou z Blenderu
-  posouvat.
+<!-- TODO: replace with a GIF: click "Blender" in Godot → move a crate → "Send to Godot" -->
+<p align="center"><img src="docs/demo.gif" width="720" alt="Blenderang demo"></p>
 
 ---
 
-## Instalace
+## Why
 
-### Godot
+Godot is great for building the game, and Blender is great for arranging and
+shaping the world. Moving between them usually means exporting, importing and
+fixing things by hand. Blenderang makes it a round trip that starts and ends
+in Godot:
 
-Zkopíruj `addons/blender_bridge/` do projektu a zapni v
-`Project ▸ Project Settings ▸ Plugins`.
+1. In Godot, click **Blender**. Your scene opens in Blender, fully built.
+2. Move objects, reshape models, add new ones.
+3. Click **Send to Godot**. The scene updates in the editor, ready to play.
 
-V `Editor Settings ▸ FileSystem ▸ Import ▸ Blender ▸ Blender Path` nastav cestu
-k Blenderu. Je to stejné nastavení, které Godot používá pro import `.blend`,
-takže ho možná už máš.
+It's made for **whiteboxing and modelling inside your real game levels**.
+Instead of building a model in an empty Blender file and guessing how it will
+fit, you shape it right where it stands, surrounded by the actual level from
+Godot: terrain, buildings, characters and all.
 
-| odkud | cesta |
+What you get:
+
+- **Lay out scenes in Blender.** Move, rotate, scale, duplicate and delete
+  objects, then send the new layout back to the `.tscn`.
+- **Edit models in context.** Open a model's source `.blend` with the rest of
+  the level around it, edit it, press `Ctrl+S`, and the `.glb` is re-exported
+  and reimported by Godot.
+- **No source `.blend`? No problem.** *Make source* turns any `.glb` into an
+  editable `.blend` next to the asset.
+- **The `.tscn` stays the truth.** Blender never saves its own copy of the
+  scene, so nothing can drift out of sync and `git pull` never breaks it.
+- **One undo.** Each import from Blender is a single undo step in Godot.
+- **Terrain3D preview.** Your [Terrain3D](https://github.com/TokisanGames/Terrain3D)
+  terrain shows up in Blender with a baked colour map, so you can place things
+  on it. It's read-only: you can't sculpt or paint the terrain in Blender.
+- **Safe for teams.** People who don't use Blender don't need to do anything.
+  The game still uses only `.glb` / `.fbx`.
+
+## Requirements
+
+| | version |
 |---|---|
-| Windows, instalátor | `C:\Program Files\Blender Foundation\Blender 5.2\blender.exe` |
+| Godot | 4.7 (tested) |
+| Blender | 5.2 (tested) |
+| OS | Windows and Linux. macOS is untested. |
+
+## Installation
+
+Blenderang has two parts: a **Godot editor plugin** and a **Blender
+extension**. You need both.
+
+### 1. Godot plugin
+
+**From the Asset Library (easiest):** in Godot open the **AssetLib** tab,
+search for *Blenderang*, click **Download**, then **Install**.
+
+**Manually:** download the latest release, copy `addons/blenderang/` into your
+project's `addons/` folder.
+
+Then:
+
+1. Enable it in `Project ▸ Project Settings ▸ Plugins`.
+2. Set the path to Blender in
+   `Editor Settings ▸ FileSystem ▸ Import ▸ Blender ▸ Blender Path`.
+   This is the same setting Godot uses for importing `.blend` files, so you
+   may already have it.
+
+| Blender installed from | typical path |
+|---|---|
+| Windows installer | `C:\Program Files\Blender Foundation\Blender 5.2\blender.exe` |
 | Windows, Steam | `C:\Program Files (x86)\Steam\steamapps\common\Blender\blender.exe` |
-| Linux, balíček / AUR | `/usr/bin/blender` |
+| Linux package / AUR | `/usr/bin/blender` |
 | Linux, Steam | `~/.local/share/Steam/steamapps/common/Blender/blender` |
-| Linux, flatpak | `/var/lib/flatpak/exports/bin/org.blender.Blender` |
+| Linux, Flatpak | `/var/lib/flatpak/exports/bin/org.blender.Blender` |
 
-### Blender
+> **Keep Godot's own `.blend` import off.** Blenderang works with `.glb` /
+> `.fbx`. If `filesystem/import/blender/enabled` is on, projects will show
+> errors on machines without Blender.
 
-Rozšíření se připojí odkazem z repa, ať se aktualizuje s `git pull`.
+### 2. Blender extension
 
-**Windows** (příkazová řádka jako správce):
+1. Download `blenderang-x.y.z.zip` from the
+   [latest release](https://github.com/Martin3225/Blenderang/releases/latest).
+2. In Blender: `Edit ▸ Preferences ▸ Get Extensions ▸ ⌄ ▸ Install from Disk…`
+   and pick the zip. Don't unzip it.
+3. Make sure **Blenderang** is enabled under `Add-ons`.
 
-```
-mklink /J "%APPDATA%\Blender Foundation\Blender\5.2\extensions\user_default\blender_bridge" "C:\cesta\k\repu\tools\blender_bridge"
+<details>
+<summary>For developers: link the extension from a git clone</summary>
+
+So that `git pull` updates it.
+
+**Windows** (Command Prompt as administrator):
+
+```bat
+mklink /J "%APPDATA%\Blender Foundation\Blender\5.2\extensions\user_default\blenderang" "C:\path\to\Blenderang\tools\blenderang"
 ```
 
 **Linux:**
 
 ```sh
-# balíček, AUR, Steam
-ln -sfn "$PWD/tools/blender_bridge" ~/.config/blender/5.2/extensions/user_default/blender_bridge
-# flatpak (má vlastní XDG_CONFIG_HOME)
-ln -sfn "$PWD/tools/blender_bridge" ~/.var/app/org.blender.Blender/config/blender/5.2/extensions/user_default/blender_bridge
+ln -sfn "$PWD/tools/blenderang" ~/.config/blender/5.2/extensions/user_default/blenderang
+# Flatpak
+ln -sfn "$PWD/tools/blenderang" ~/.var/app/org.blender.Blender/config/blender/5.2/extensions/user_default/blenderang
 ```
 
-Pak v Blenderu `Edit ▸ Preferences ▸ Add-ons ▸ ⌄ ▸ Refresh Local` a zaškrtni
-**Blender Bridge**. Jednou, napořád.
+Then in Blender: `Edit ▸ Preferences ▸ Add-ons ▸ ⌄ ▸ Refresh Local` and
+enable **Blenderang**.
 
-Bez odkazu: `blender --command extension build --source-dir tools/blender_bridge`
-a zip přes `Install from Disk`.
+To build the zip yourself:
+`blender --command extension build --source-dir tools/blenderang`
 
----
+</details>
 
-## Použití
+## Quick start
 
-Jeden klik na každé straně.
+A five-minute tour: move a prop, then edit its model.
 
-**Godot → Blender**, kterékoli z:
+### Move things around
 
-- tlačítko **Blender** v liště 3D editoru (vedle *Transform*, *View*),
-- pravé tlačítko na **tabu scény** ▸ *Otevřít v Blenderu*,
-- pravé tlačítko na **`.tscn` ve FileSystemu** ▸ *Otevřít v Blenderu* — scénu
-  nejdřív otevře, když není aktivní.
+1. Open a 3D scene in Godot that contains some `.glb` or `.fbx` models.
+2. Click the **Blender** button in the 3D editor toolbar (next to
+   *Transform* and *View*).
+   You can also right-click the scene tab, or a `.tscn` in the FileSystem
+   dock, and choose **Open in Blender**.
+3. Blender opens and builds the scene by itself. Press `N` and open the
+   **Blenderang** tab.
+4. Move, rotate or duplicate (`Shift+D`) a few models.
+5. Click **Send to Godot**.
+6. Switch back to Godot. The scene updates within a second. Don't like it?
+   `Ctrl+Z` undoes the whole import.
 
-Při prvním použití označí art instance (`.glb/.fbx`), pak uloží scénu, zapíše
-manifest a spustí Blender, který si scénu postaví bez dalšího klikání.
+### Edit a model
 
-**Blender → Godot:** velké tlačítko **Odeslat do Godotu** v `N ▸ Bridge`.
-Godot si změnu všimne do sekundy a načte ji do otevřené scény jako jednu undo
-akci — `Ctrl+Z` ve scéně ji vrátí.
+1. In the Blenderang panel, find the model in the **Models** list (the search
+   box matches the name, the node path and the asset file).
+2. If it says **Make source**, click it once. This creates `model.blend` next
+   to `model.glb`, ready for editing.
+3. Click **Edit**. The model's `.blend` opens with the rest of the level
+   around it as locked context, so you can see how it fits.
+4. Change the model, then press `Ctrl+S`. The `.blend` is saved and the `.glb`
+   is re-exported. Godot reimports it on its own.
+5. Click **Save and return to scene** to go back to the layout.
 
-Scéna v Blenderu **nemá vlastní `.blend` a nic se neukládá**. Pravdou
-o rozmístění je vždycky `.tscn`; Blender je jen editor nad ní a pokaždé se
-postaví znovu z manifestu. Nemůže se tak rozejít s Godotem a `git pull` nic
-nerozbije.
+That's it.
 
-Panel `N ▸ Bridge`:
+## How it works
 
-- **Odeslat do Godotu**
-- **Znovu načíst z Godotu** — postaví scénu z posledního manifestu (zahodí
-  neodeslané změny); hodí se i po změnách v Godotu.
-- **Modely** — seznam všech modelů scény s hledáním (jméno, cesta v Godotu
-  i název assetu, víc slov = všechna musí sedět). Klik na jméno model vybere
-  a zaměří.
-  Vedle je **Upravit** (model má zdrojový `.blend`), nebo **Vyrobit zdroj**
-  (model je zatím jen náhled z `.glb`).
-- **Detail** — o vybraném objektu: u modelu node v Godotu, rodič, asset,
-  zdrojový `.blend` (nebo kam se vyrobí) a id, plus tlačítka **Upravit** /
-  **Vyrobit zdroj**, **Vybrat zdroj…** a **Zrušit výběr zdroje**; u objektu
-  z Godotu, ke kterému nodu patří; u ostatního, že je to pomocný objekt,
-  který se neposílá.
-- Pokud se něco nepodařilo načíst (vadný asset, vadný kontext), panel to
-  vypíše červeně. Scéna se i tak dostaví — vadný model zůstane jako osa na
-  svém místě, místo vadného kontextu jsou obálky.
+### What you can move
 
-V outlineru:
+On first use, Blenderang marks the art instances in your scene (`.glb` /
+`.fbx` models) with a `bb_id` metadata entry. **Only nodes with `bb_id` are
+ever changed by Blender.** Gameplay scenes (like `Player.tscn`), anything
+under a physics body, and the insides of other instanced scenes are left
+alone.
 
-- `BB_Layout` — modely, se kterými můžeš hýbat, otáčet je, duplikovat
-  (`Shift+D`) a mazat. Každý je vidět jednou, na svém místě. Model, který je
-  v Godotu dítětem jiného modelu (výstroj na `armature_f`), je v Blenderu jeho
-  potomkem: posun rodiče posune i děti. Když v Blenderu smažeš rodiče a děti
-  necháš, v Godotu se přesunou pod nejbližšího předka.
-- `BB_Locked` — skutečná geometrie všeho ostatního ze scény: postavy, budovy,
-  terén (z Terrain3D, s upečenou barvou, rozlišení viz [Rozlišení terénu](#rozlišení-terénu)), spawnpointy
-  a markery jako osy
-  velké 1 m, světla. Jde vybrat
-  a zaměřit (`numpad .`), ale ne posunout — změny by se do Godotu stejně
-  nepropsaly. Tráva a stromy z MultiMeshe (ProtonScatter) se nepřenáší.
+In Blender's outliner you'll see:
 
-Objekty bez `bb_id` se do Godotu neposílají — pomocná geometrie ve hře
-neskončí. Protože se scéna neukládá, při dalším otevření z Godotu zmizí.
+- **`BB_Layout`**: models you can move, rotate, scale, duplicate and delete.
+  A model that is a child of another model in Godot (gear on a character) is
+  its child in Blender too, so it moves with its parent.
+- **`BB_Locked`**: real geometry of everything else in the scene (characters,
+  buildings, terrain, lights, markers). You can select it and focus on it,
+  but not move it.
 
-### Kdo smí s čím hýbat
+Objects you add in Blender without a `bb_id` are helpers. They aren't sent to
+Godot and disappear the next time you open the scene.
 
-Blender zapisuje **jen do nodů s metadatem `bb_id`**. To, že je něco instance
-scény, nestačí — `Player` je taky instance a zůstává zamčený. Hromadné
-označování vynechává vnitřnosti cizích instancí a cokoli pod fyzikálním
-tělesem (to jsou gameplay celky).
+Mark or unmark nodes manually with
+`Project ▸ Tools ▸ Blenderang ▸ Mark selection / Unmark selection`.
+Add the metadata `bb_pinned` to a node to stop Blender from moving it.
 
-Ručně: `… ▸ Pokročilé ▸ Označit výběr / Zrušit označení`. Node s metadatem
-`bb_pinned` import přeskočí — pro objekt doladěný v Godotu.
+### Where model sources live
 
----
-
-## Zdroje geometrie
-
-Zdrojový `.blend` leží **vedle** assetu se stejným názvem:
+Blenderang looks for the source `.blend` **next to the asset, with the same
+name**:
 
 ```
-scenes/demo_scene/zviretice_zamek_whitebox/zviretice.glb     ← ve hře
-scenes/demo_scene/zviretice_zamek_whitebox/zviretice.blend   ← zdroj
+levels/castle/castle.glb     ← used by the game
+levels/castle/castle.blend   ← source for editing
 ```
 
-Když to nesedí (jeden `.blend` s víc modely, zdroj jinde), vybere se zdroj
-ručně: v Blenderu **Detail ▸ Vybrat zdroj…** (prohlížeč souborů začne vedle
-assetu), v Godotu `Project ▸ Tools ▸ Blender Bridge ▸ Vybrat zdrojový .blend
-pro výběr…`. Platí pro všechny instance assetu.
+If your source is somewhere else, or one `.blend` holds several models, pick
+it by hand with **Detail ▸ Pick source…** in Blender or
+`Project ▸ Tools ▸ Blenderang ▸ Pick source .blend for selection…` in Godot.
 
-| kde leží vybraný `.blend` | kam se uloží | kdo ho vidí |
+| where the picked `.blend` is | stored in | who sees it |
 |---|---|---|
-| v projektu | `<asset>.bbsrc` vedle assetu (cesta relativně ke kořeni) | celý tým přes git |
-| mimo projekt | `.pipeline/local/sources.json` (absolutní cesta) | **jen ty** |
+| inside the project | `<asset>.bbsrc` next to the asset | everyone, via git |
+| outside the project | `.pipeline/local/sources.json` | only you |
 
-Zdroj mimo projekt je pro případ, kdy zdrojáky nemá každý. Blender i Godot
-na to po výběru upozorní a panel Detail to u modelu ukazuje červeně —
-ostatní ho neuvidí a model upravit nemůžou, uvidí dál jen `.glb`.
-`.pipeline/local/` má vlastní `.gitignore` s `*`, takže se nikdy necommitne
-a do týmového `.gitignore` není potřeba sahat.
+### Export settings
 
-Pořadí: osobní výběr → `.bbsrc` → `.blend` vedle assetu. **Zrušit výběr
-zdroje** zruší nejdřív osobní výběr, pak sdílený. Centrální index záměrně
-neexistuje, byl by to zdroj merge konfliktů.
+When you edit a model, the panel shows **Export settings** for its `.glb`:
+apply modifiers, +Y up, materials, image format, animation, skinning, shape
+keys, tangents, custom properties and Draco compression. They're saved inside
+the source `.blend`. **Export now** re-exports without saving. Defaults for
+new sources are in `Preferences ▸ Add-ons ▸ Blenderang`.
 
-| tier | geometrie | v Blenderu |
+> **Shape keys:** glTF export drops shape keys on meshes that have
+> modifiers when *Apply modifiers* is on. Turn it off for that model if you
+> need them.
+
+### Terrain3D (preview only)
+
+Blenderang is partially compatible with
+[Terrain3D](https://github.com/TokisanGames/Terrain3D). The terrain is baked
+to a mesh plus a top-down colour map so you can see it and place things on it
+in Blender. It's locked there: changes to the terrain itself are never sent
+back, so keep sculpting and painting in Godot.
+Resolution is set in `Project Settings ▸ Blenderang ▸ Terrain`:
+
+| setting | default | options |
 |---|---|---|
-| `none` | jen `.glb` | naimportuje se jako náhled; posouvat jde, úpravy tvaru se neuloží |
-| `library` | vlastní `.blend` vedle assetu | nalinkovaný; **Upravit model** otevře jeho soubor |
+| `mesh_spacing_m` | 8 m | 1, 2, 4, 8, 16, 32 m |
+| `texture_size` | 2048 px | 1024 – 8192 px |
 
-### Z náhledu upravitelný model
+The bake is cached and only redone when the terrain or settings change.
 
-**Vyrobit zdroj** zapíše model do nového `.blend` vedle assetu i s nastaveným
-exportem do `.glb` a hned ho nalinkuje zpátky — u všech instancí téhož assetu.
-Převod přes `.glb` zachová meshe, UV, armaturu a základní materiály, ne shader
-node setupy ani modifikátory — dělá se jednou. Existující `.blend` se nikdy
-nepřepíše.
+### Files Blenderang creates
 
-### Úprava modelu
+Everything lives in `.pipeline/` in your project (it has a `.gdignore`):
 
-**Upravit** u modelu:
+| file | what |
+|---|---|
+| `<scene>.json` | manifest: ids and transforms of the scene's nodes |
+| `<scene>.context.glb` | locked context geometry for Blender |
+| `<scene>.terrain.*` | terrain bake cache |
+| `local/` | your personal settings, never committed |
 
-1. odešle rozpracované přesuny do Godotu, ať se nic neztratí,
-2. otevře zdrojový `.blend` modelu,
-3. kolem modelu postaví **zamčený kontext ze scény** (`BB_Context`) —
-   skutečnou geometrii z Godotu i ostatní modely — posunutý tak, jako by
-   model stál na svém místě ve scéně. Další výskyty téhož modelu ukazují na
-   upravovanou kolekci, takže úpravy jsou vidět na všech místech naráz.
+You can commit `.pipeline/` or ignore it. Everything in it can be rebuilt.
 
-`Ctrl+S` model uloží **a přegeneruje `.glb`**; Godot ho sám reimportuje.
-Kontext se před každým uložením odebere a po něm vrátí, do zdrojového souboru
-se nikdy nezapíše.
+## Limitations
 
-#### Nastavení exportu
+- Grass and trees placed with MultiMesh (e.g. ProtonScatter) aren't shown in
+  Blender.
+- *Make source* goes through `.glb`, so it keeps meshes, UVs, armatures and
+  basic materials, but not shader node setups or modifiers.
+- Terrain3D terrain is a read-only preview in Blender, shown as an unlit
+  colour map because its shader can't be reproduced there.
+- macOS is untested. Windows isn't covered by the automated GUI tests.
 
-Export do `.glb` ve výchozím stavu **aplikuje modifikátory** (kromě armatury),
-takže v Godotu je stejná geometrie jako ve viewportu. Při úpravě modelu je
-v panelu Bridge box **Nastavení exportu**: aplikovat modifikátory, osa Y
-nahoru, materiály, formát textur, animace, skinning, shape keys, tangenty,
-custom properties a Draco komprese. Nastavení se ukládá do zdrojového `.blend`
-(je to Collection Exporter kolekce, ostatní volby glTF jsou v
-*Vlastnosti kolekce › Exporters*). **Exportovat teď** přegeneruje `.glb` bez
-uložení, **Výchozí nastavení** vrátí volby z předvoleb.
+## Troubleshooting
 
-Výchozí volby pro nové zdroje se mění v *Předvolby › Add-ons › Blender
-Bridge*. Dostane je i starší zdroj, který si nastavení ještě nepamatuje (pozná
-se podle vlastnosti `bb_export_set` na kolekci) — jednou, při prvním otevření
-přes **Upravit**; potom už platí jen to, co je uložené ve zdroji.
+| problem | fix |
+|---|---|
+| Clicking **Blender** does nothing | Check the Blender path in Editor Settings. |
+| Blender opens but the panel says to open a scene from Godot | The Blender extension isn't enabled, or the versions don't match. |
+| A model shows as an empty axis | Its `.glb` failed to load. The panel lists the error in red. |
+| My edits didn't come back to Godot | Only nodes with `bb_id` are updated. Check that the node is marked and not `bb_pinned`. |
 
-> glTF exportér při aplikaci modifikátorů zahodí shape keys meshe, který
-> nějaký (jiný než armaturu) má. Pokud je model potřebuje, vypni u něj
-> „Aplikovat modifikátory“, nebo modifikátory aplikuj ručně.
-
-**Uložit a zpět do scény** postaví scénu znovu z manifestu, už s novým modelem.
-
----
-
-## Manifest
-
-`.pipeline/<scéna>.json` (+ `.last.json`, snímek pro diff). Adresář má
-`.gdignore`.
-
-```json
-{
-  "format": 1,
-  "coord_system": "godot_y_up",
-  "context_glb": ".pipeline/demo_scene.context.glb",
-  "nodes": [
-    { "bb_id": "4a7f…", "owner": "blender", "name": "Zviretice",
-      "path": "NavigationRegion3D/Zviretice", "parent": "NavigationRegion3D",
-      "src": "res://scenes/demo_scene/zviretice_zamek_whitebox/zviretice.glb",
-      "tier": "library",
-      "src_blend": "scenes/demo_scene/zviretice_zamek_whitebox/zviretice.blend",
-      "xform": [bx,by,bz, cx,cy,cz, dx,dy,dz, ox,oy,oz],
-      "bounds": { "position": [...], "size": [...] } },
-    { "owner": "godot", "name": "Terrain3D", "kind": "terrain",
-      "xform": [...], "bounds": { "position": [...], "size": [...] } }
-  ]
-}
-```
-
-`xform` je world transform vůči kořeni scény (tři sloupce báze, pak origin)
-v Godot osách; node s `top_level` (Terrain3D) rodiče ignoruje. Převod do
-Blenderu (Z nahoru) dělá výhradně addon. Import zpět přepočítá na lokální
-transformaci pod rodičem.
-
-`.context.glb` je skutečná geometrie všeho, co vlastní Godot, a terén upečený
-z Terrain3D. `bounds` slouží jako záložní krabice, když `.glb` chybí.
-
-### Materiál terénu
-
-Shader Terrain3D (splatting z texturového pole, control mapa, auto shader podle
-sklonu) do Blenderu 1:1 převést nejde. Plugin proto upeče barvu terénu shora:
-v každém pixelu průměrná barva textur, které tam control mapa míchá — nebo
-auto shader stejným vzorcem jako Terrain3D (`auto_slope`, `auto_height_reduction`,
-`auto_base/overlay_texture`) — vynásobená barevnou mapou. Výsledek vypadá jako
-plochá satelitní mapa bez osvětlení a makrovariace, na rozmisťování stačí.
-
-Ukládá se do `.pipeline/<scéna>.terrain.png` a znovu se počítá, jen když se
-změní data terénu, textury, parametry auto shaderu nebo rozlišení.
-
-### Rozlišení terénu
-
-`Project Settings ▸ Blender Bridge ▸ Terrain`. Platí pro celý tým; dokud je
-hodnota výchozí, do `project.godot` se nic nezapíše.
-
-| nastavení | výchozí | možnosti |
-|---|---|---|
-| `mesh_spacing_m` — vzdálenost vrcholů | 8 m | 1, 2, 4, 8, 16, 32 m |
-| `texture_size` — delší strana barvy | 2048 px | 1024 – 8192 px |
-
-Vzdálenost se zaokrouhlí na mocninu dvou `vertex_spacing` terénu (LOD
-`bake_mesh`). Mesh i textura se ukládají do `.pipeline/<scéna>.terrain.res`
-/ `.terrain.png` a pečou se znovu jen po změně terénu nebo nastavení — další
-otevření v Blenderu je rychlé.
-
-Orientačně pro terén 7,7 × 4 km (změřeno ~6 µs na vrchol, ~2,7 µs na pixel,
-jen první pečení; čas glTF exportu a importu v Blenderu navíc):
-
-| vrchol | vrcholů | pečení |
-|---|---|---|
-| 16 m | 120 tisíc | < 1 s |
-| 8 m | 480 tisíc | 3 s |
-| 4 m | 1,9 milionu | 12 s |
-| 2 m | 7,7 milionu | 45 s |
-
-Nad 4 miliony vrcholů Godot upozorní. Textura 4096 px se peče asi 45 s,
-8192 px asi 3 minuty.
-
----
-
-## Testy
+## Running the tests
 
 ```sh
-python tests/run_tests.py                      # všechno (173 testů), ~40 s
-python tests/run_tests.py --only blender       # jedna sada
-python tests/run_tests.py --regen-fixtures     # přegenerovat testovací scény
+python tests/run_tests.py                  # everything, ~40 s
+python tests/run_tests.py --only blender   # one suite
+python tests/run_tests.py --regen-fixtures # regenerate test scenes
 ```
 
-Potřeba: Python 3, Godot 4.7 a Blender 5.2 (na PATH, v `$GODOT`/`$BLENDER`,
-nebo `--godot`/`--blender`; flatpak a Steam se najdou samy). Terrain3D si
-runner stáhne (zafixovaná verze 1.0.2) do `tests/.cache`. Pro GUI sadu na
-Linuxu `Xvfb`.
+You need Python 3, Godot and Blender (on `PATH`, in `$GODOT` / `$BLENDER`, or
+passed with `--godot` / `--blender`). On Linux the GUI suite needs `Xvfb`.
+Tests run in an isolated copy under `tests/.work` with their own Godot and
+Blender config, so they never touch your settings or your game project.
 
-Všechno běží v `tests/.work`: testovací projekt se zkopíruje a addon se do něj
-doplní z repa. Godot i Blender dostanou vlastní konfigurační adresáře, takže
-se nedotknou tvých nastavení, a Blender běží s `--factory-startup` bez tvých
-addonů.
-**Tvého herního projektu se testy nedotknou.**
+## Contributing
 
-### Testovací scény
+Bug reports and pull requests are welcome. Please open an
+[issue](https://github.com/Martin3225/Blenderang/issues) first for anything
+big. This is a small hobby project, so replies may take a while.
 
-`tests/godot/fixtures/` generuje `fixtures/generate.gd` (scény) a
-`tests/fixtures/make_assets.py` (assety). Pokrývají:
+## License
 
-| fixture | co testuje |
-|---|---|
-| `Props/Crate`, `Tower`, `Barrel` (.fbx) | art instance v kontejneru, glTF i FBX |
-| `Rotated/InRotated` | rodič otočený o 90° a zvětšený 2× |
-| `Rotated/Detached` | `top_level` pod transformovaným rodičem |
-| `Player` (.tscn) | gameplay instance — nesmí se označit |
-| `Building` + `Decoration` | těleso s meshem, kolizí a vnořenou instancí |
-| `Character` (`rig.glb`) | armatura — pomocné tvary kostí importéru |
-| `Character/Helmet`, `Character/Socket` | dítě modelu (výstroj) a marker na modelu |
-| `Spawn`, `Sun`, `Logic/Floating` | kontext bez meshe, Node mezi Node3D |
-| `terrain.tscn` | Terrain3D pod posunutým rodičem, kopec, krabice na vrcholu; tři textury, malovaný písek, kvadrant s auto shaderem, obarvený roh |
-| `second.tscn` | otevření neaktivní scény z kontextového menu |
+- Godot plugin (`addons/blenderang/`): [MIT](LICENSE)
+- Blender extension (`tools/blenderang/`): [GPL-3.0-or-later](tools/blenderang/LICENSE),
+  as required for Blender add-ons
 
-### Use casy a sady
-
-| use case | sada |
-|---|---|
-| První otevření: označení, uložení scény, manifest, kontext, spuštění Blenderu | editor, godot |
-| Tlačítko v liště, kontextové menu tabu i FileSystemu | editor |
-| Blender postaví scénu ze startovního Pythonu (i v okně z časovače) | gui, e2e |
-| Model je vidět jednou, na místě z Godotu (rotace, měřítko, `top_level`) | blender |
-| Skutečná geometrie kontextu, terén, zamčená ale vybratelná | blender, godot |
-| Posun, rotace, měřítko → správná lokální transformace v Godotu | blender, godot, e2e |
-| Duplikace → nová instance s vlastním id pod správným rodičem | blender, godot, e2e |
-| Smazání; pomocné objekty bez `bb_id` se neposílají | blender, godot, e2e |
-| `bb_pinned` v Godotu; gameplay nody se nemění | blender, godot, e2e |
-| Automatické načtení, Ctrl+Z ve scéně, starý manifest po restartu | editor |
-| Vyrobit zdroj: `.blend` vedle assetu s exportem, všechny instance | blender, gui, e2e |
-| Upravit model: kontext, Ctrl+S přegeneruje `.glb`, kontext se neuloží | blender, gui |
-| Reimport `.glb` po Ctrl+S ve zdroji: model zůstane označený, terén v kontextu | editor, godot |
-| `.bbsrc`, zdroj vedle assetu, poškozený zdroj; Vybrat / Zrušit zdroj | godot, blender |
-| Zdroj mimo projekt: osobní, neuloží se do repa, upozornění, úprava modelu | godot, blender, gui |
-| Děti modelů: hierarchie v Blenderu, posun s rodičem, smazání rodiče | godot, blender, e2e |
-| Materiál terénu: control mapa, auto shader, barevná mapa, cache | godot, blender |
-| Rozlišení terénu z Project Settings, cache meshe | godot |
-| Hledání v seznamu modelů | blender, gui |
-| Panel v obou režimech, zaměření pohledu, dohled na terén | gui |
-
-Netestováno na Windows (runner tam GUI sadu přeskočí).
-
-### Co testy našly
-
-Při psaní testů a ostrém použití se ukázalo patnáct chyb, všechny opravené
-a pokryté testem:
-
-- **Děti modelu (výstroj na `armature_f`) se do Blenderu vůbec nedostaly** —
-  manifest bral model jako celek a jeho děti ze scény neprocházel.
-- **Dítě posunuté s rodičem se v Godotu posunulo dvakrát** — lokální
-  transformace se počítala vůči staré pozici rodiče.
-
-- **Kontext exportovaný z editoru byl prázdný.** glTF export v editoru
-  přeskakuje nody bez `owner`; mimo editor ne, proto to headless testy
-  nechytily. Editor test teď kontroluje i obsah `.context.glb`.
-- **Vadný `.glb` shodil celou stavbu scény** — Blender pak neukázal kontext,
-  seznam modelů ani detail.
-
-- **Blender v okně spadl při stavbě scény s armaturou.** Startovní příkaz
-  z Godotu běží z časovače bez 3D pohledu a glTF importér si ho u armatur
-  vyžaduje. Stavba skončila v půlce — odtud zdvojené modely v počátku.
-- **Náhledy modelů byly ve scéně podruhé** (v počátku) a pomocný tvar kostí
-  armatury se válel ve scéně (`Icosphere`).
-- **Terrain3D dostal posun rodiče**, přestože je `top_level`; při importu
-  zpět by se totéž stalo každému `top_level` nodu.
-- **Kontext obsahoval interní mesh Terrain3D** (`MouseQuad`) a geometrii
-  vnořených jednotek dvakrát.
-- **Ctrl+Z ve scéně nevracel import** — akce skončila v globální historii.
-- **Export do `.glb` po uložení zdroje fungoval jen náhodou** —
-  `libraries.write` neuloží cestu exporteru a `wm.collection_export_all`
-  exportuje jen kolekce ve scéně.
-- **Vyrobit zdroj přepojil jen jednu instance** — ostatní instance téhož
-  `.glb` přišly o geometrii.
-- **Odeslání ze skriptu posílalo starou pozici** (nepřepočtená matice).
-- **Poškozený `.blend` vedle assetu shodil otevření celé scény.**
-- **Po úpravě modelu přestal být model upravitelný a zmizel terén.** Godot
-  při reimportu `.glb` nahradí instance v otevřené scéně novými nody a zahodí
-  jim metadata, takže `bb_id` zmizelo (a další otevření v Blenderu to uložilo).
-  Plugin si teď značky před reimportem zapamatuje a vrátí.
-- **Terén pod `NavigationRegion3D` bez modelu se do Blenderu nedostal** —
-  rodič šel jako jeden celek a vnitřní meshe Terrain3D nemají ownera.
-
----
-
-## Rozhodnutí: scéna nemá `.blend`
-
-Layout scény jako `.blend` byl zrušen. Pravdou o rozmístění je `.tscn`,
-Blender je jen editor nad ní.
-
-- Nemůže se rozejít s Godotem, `git pull` nic nerozbije, žádný binární soubor
-  na scénu, který může držet jen jeden člověk, o krok méně (nic se neukládá).
-- Každý upravitelný model má vlastní `.blend` vedle `.glb`.
-- Okolí při úpravě modelu dodává dočasný kontext z manifestu, který se do
-  zdroje nikdy neuloží.
-- Cutscény budou samostatné soubory (`cutscene_01.blend` → `.glb` s akcemi),
-  ne vlastnost layoutu.
-
----
-
-## Úvaha: úprava heightmapy terénu v Blenderu
-
-Zatím neimplementováno.
-
-**Proč ne celý terén najednou.** Terrain3D má výšku po 1 m; terén 7,7 × 4 km
-je 31 milionů vzorků. Takový mesh Blender v sculpt módu neutáhne a do kontextu
-jde terén ve výchozím nastavení po 8 m.
-
-**Návrh: úprava výřezu.**
-
-1. V Blenderu vybereš oblast (obdélník, nebo „kolem vybraného modelu“,
-   výchozí 256 × 256 m, max. 512 × 512 m).
-2. Godot vyexportuje výřez v plném rozlišení jako mřížku, kde jeden vrchol
-   odpovídá jednomu pixelu heightmapy (256 m → 66 tisíc vrcholů, sculpt to
-   zvládne). Okraj výřezu je ve vertex group a je zamčený, aby nevznikl schod.
-3. Sculptuješ, nebo použiješ modifikátory, Shrinkwrap pod modelem a podobně.
-4. **Odeslat terén do Godotu** z každého vrcholu vezme výšku a Godot ji zapíše
-   přes `set_height` do regionů jako jednu undo akci.
-
-**Co hlídat.**
-
-- Topologie se nesmí změnit (dyntopo, remesh, subdivide by mapování
-  vrchol → pixel rozbily) — odeslání to pozná podle počtu vrcholů a odmítne.
-- Konflikt: když mezitím někdo terén v té oblasti změnil v Godotu, odeslání
-  se odmítne (podpis dat výřezu z okamžiku exportu).
-- Control mapa (malování textur), díry a navigace zůstávají v Godotu.
-- Uložení: Godot zapíše jen změněné regiony při uložení scény (Terrain3D
-  `set_region_modified`).
-
-**Na co se to hodí:** srovnat terén pod zámkem, vymodelovat příkop, cestu nebo
-násep přesně k modelu — tam, kde nástroje Terrain3D nestačí nebo je potřeba
-vidět model. Plošné tvarování krajiny zůstává v Terrain3D, ten na to má lepší
-nástroje.
-
----
-
-## Co zbývá
-
-- Úprava heightmapy terénu v Blenderu (rozmyšleno, viz níže).
-- Tráva a stromy z MultiMeshe.
-- Ověření na Windows.
+Blender is a trademark of the Blender Foundation. Godot is a trademark of
+the Godot Foundation. Blenderang isn't affiliated with either.

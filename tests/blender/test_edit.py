@@ -8,7 +8,7 @@ import time
 
 import bpy
 
-import blender_bridge.bridge as bridge
+import blenderang.bridge as bridge
 import harness
 from harness import BridgeCase, godot_to_blender_point
 

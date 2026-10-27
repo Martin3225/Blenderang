@@ -8,7 +8,7 @@ extends EditorPlugin
 ## a [code].tscn[/code] in the FileSystem), [i]Send to Godot[/i] in Blender.
 ## Changes from Blender are loaded into the open scene automatically.
 
-const MENU_NAME: String = "Blender Bridge"
+const MENU_NAME: String = "Blenderang"
 const PERSONAL_SOURCE_NOTICE: String = """%s is outside the Godot project.
 
 The path is not saved in the project, it only applies to you. Others on the team won't see this source and can't edit the model; they will still see only the .glb.
@@ -99,7 +99,7 @@ func _exit_tree() -> void:
 func _on_toolbar_pressed() -> void:
 	var root: Node = EditorInterface.get_edited_scene_root()
 	if root == null:
-		push_warning("Blender Bridge: no scene is open.")
+		push_warning("Blenderang: no scene is open.")
 		return
 	_open_in_blender(root)
 
@@ -112,7 +112,7 @@ func open_scene_in_blender(path: String) -> void:
 		EditorInterface.open_scene_from_path(path)
 		root = EditorInterface.get_edited_scene_root()
 	if root == null or root.scene_file_path != path:
-		push_error("Blender Bridge: could not open scene %s." % path)
+		push_error("Blenderang: could not open scene %s." % path)
 		return
 	_open_in_blender(root)
 
@@ -120,7 +120,7 @@ func open_scene_in_blender(path: String) -> void:
 func _on_action(id: int) -> void:
 	var root: Node = EditorInterface.get_edited_scene_root()
 	if root == null:
-		push_warning("Blender Bridge: no scene is open.")
+		push_warning("Blenderang: no scene is open.")
 		return
 	match id:
 		Action.OPEN_IN_BLENDER:
@@ -146,17 +146,17 @@ func _open_in_blender(root: Node) -> void:
 	if BBOwnership.collect_ids(root, duplicates).is_empty():
 		_mark(_find_props(root), root)
 	if root.scene_file_path.is_empty():
-		push_warning("Blender Bridge: save the scene first, the manifest is named after it.")
+		push_warning("Blenderang: save the scene first, the manifest is named after it.")
 		return
 	# The bb_id marks must be on disk, otherwise the import wouldn't find them.
 	if EditorInterface.save_scene() != OK:
-		push_error("Blender Bridge: could not save the scene.")
+		push_error("Blenderang: could not save the scene.")
 		return
 	var path: String = _export(root)
 	if path.is_empty():
 		return
 	if BBLauncher.launch(ProjectSettings.globalize_path(path)) == OK:
-		print("Blender Bridge: launching Blender with scene %s." % root.scene_file_path.get_file())
+		print("Blenderang: launching Blender with scene %s." % root.scene_file_path.get_file())
 
 
 ## Sets the exact path to the source .blend of the selected asset. It's
@@ -165,7 +165,7 @@ func _open_in_blender(root: Node) -> void:
 func _pick_source() -> void:
 	var selected: Array[Node] = EditorInterface.get_selection().get_selected_nodes()
 	if selected.size() != 1 or selected[0].scene_file_path.is_empty():
-		push_warning("Blender Bridge: select exactly one instanced node.")
+		push_warning("Blenderang: select exactly one instanced node.")
 		return
 	var asset: String = selected[0].scene_file_path
 	var dialog: EditorFileDialog = EditorFileDialog.new()
@@ -179,7 +179,7 @@ func _pick_source() -> void:
 		dialog.queue_free()
 		var personal: bool = BBPaths.choose_source(asset, path)
 		EditorInterface.get_resource_filesystem().scan()
-		print("Blender Bridge: %s → %s%s" % [asset.get_file(), path, " (only for you)" if personal else ""])
+		print("Blenderang: %s → %s%s" % [asset.get_file(), path, " (only for you)" if personal else ""])
 		if personal:
 			_warn_personal_source(path)
 	)
@@ -202,7 +202,7 @@ func _mark(nodes: Array[Node], root: Node) -> void:
 	var duplicates: Array[Node] = []
 	var taken: Dictionary = BBOwnership.collect_ids(root, duplicates)
 	var undo: EditorUndoRedoManager = get_undo_redo()
-	undo.create_action("Blender Bridge: mark nodes")
+	undo.create_action("Blenderang: mark nodes")
 	var marked: int = 0
 	for node: Node in nodes + duplicates:
 		if not node is Node3D:
@@ -217,12 +217,12 @@ func _mark(nodes: Array[Node], root: Node) -> void:
 		undo.add_do_method(node, &"set_meta", BBOwnership.META_ID, id)
 		undo.add_undo_method(node, &"remove_meta", BBOwnership.META_ID)
 	undo.commit_action()
-	print("Blender Bridge: marked %d nodes." % marked)
+	print("Blenderang: marked %d nodes." % marked)
 
 
 func _unmark(nodes: Array[Node]) -> void:
 	var undo: EditorUndoRedoManager = get_undo_redo()
-	undo.create_action("Blender Bridge: unmark nodes")
+	undo.create_action("Blenderang: unmark nodes")
 	for node: Node in nodes:
 		if not BBOwnership.is_blender_owned(node):
 			continue
@@ -249,7 +249,7 @@ func _export(root: Node) -> String:
 	if path.is_empty():
 		return ""
 	_known_md5[path] = FileAccess.get_md5(path)
-	print("Blender Bridge: manifest written to %s" % path)
+	print("Blenderang: manifest written to %s" % path)
 	return path
 
 
@@ -275,7 +275,7 @@ func _restore_marks() -> void:
 		var marks: Dictionary = _marks_before_reimport.get(root.scene_file_path, {})
 		var restored: int = BBOwnership.restore_marks(root, marks)
 		if restored > 0:
-			print("Blender Bridge: restored marks on %d nodes in scene %s after reimport." % [restored, root.scene_file_path.get_file()])
+			print("Blenderang: restored marks on %d nodes in scene %s after reimport." % [restored, root.scene_file_path.get_file()])
 	_marks_before_reimport.clear()
 
 
@@ -305,19 +305,19 @@ func _import(root: Node, automatic: bool) -> void:
 	var path: String = BBManifest.manifest_path(root)
 	var manifest: Dictionary = BBApply.read_json(path)
 	if manifest.is_empty():
-		push_warning("Blender Bridge: manifest is missing, open the scene in Blender first.")
+		push_warning("Blenderang: manifest is missing, open the scene in Blender first.")
 		return
 	var baseline: Dictionary = BBApply.read_json(BBManifest.baseline_path(root))
 	var plan: BBApply.Plan = BBApply.plan(root, manifest, baseline)
 	if plan.is_empty():
 		if not automatic:
-			print("Blender Bridge: no changes.")
+			print("Blenderang: no changes.")
 		return
 	BBApply.commit(root, BBApply.operations(root, plan), get_undo_redo())
 	BBManifest.store(BBManifest.baseline_path(root), JSON.stringify(manifest, "\t"))
 	_known_md5[path] = FileAccess.get_md5(path)
-	print("Blender Bridge: from Blender %s (Ctrl+Z to undo)" % plan.summary())
+	print("Blenderang: from Blender %s (Ctrl+Z to undo)" % plan.summary())
 	for problem: String in plan.unresolved:
-		push_warning("Blender Bridge: %s" % problem)
+		push_warning("Blenderang: %s" % problem)
 	for name: String in plan.pinned:
-		push_warning("Blender Bridge: %s is pinned in Godot, change from Blender ignored." % name)
+		push_warning("Blenderang: %s is pinned in Godot, change from Blender ignored." % name)

@@ -4,5 +4,5 @@ __pycache__/
 tests/.work/
 tests/.cache/
 tests/godot/.godot/
-tests/godot/addons/blender_bridge
+tests/godot/addons/blenderang
 tests/godot/addons/terrain_3d

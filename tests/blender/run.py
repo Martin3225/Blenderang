@@ -21,8 +21,8 @@ sys.path.insert(0, HERE)
 
 results = []
 try:
-    import blender_bridge
-    blender_bridge.register()
+    import blenderang
+    blenderang.register()
     import harness
     harness.configure(options["--project"])
 

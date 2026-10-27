@@ -42,7 +42,7 @@ static func launch(manifest_abs: String) -> Error:
 	var executable: String = blender_path()
 	if executable.is_empty() or not FileAccess.file_exists(executable):
 		push_error(
-			"Blender Bridge: set the Blender path in Editor Settings ▸ FileSystem ▸ Import ▸ Blender ▸ Blender Path (currently: \"%s\")"
+			"Blenderang: set the Blender path in Editor Settings ▸ FileSystem ▸ Import ▸ Blender ▸ Blender Path (currently: \"%s\")"
 			% executable
 		)
 		return ERR_FILE_NOT_FOUND

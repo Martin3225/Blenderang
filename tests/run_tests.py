@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Blender Bridge tests.
+"""Blenderang tests.
 
     python tests/run_tests.py                 # everything
     python tests/run_tests.py --only godot    # a single suite
@@ -191,7 +191,7 @@ def prepare(tools: Tools) -> None:
         shutil.rmtree(WORK)
     OUT.mkdir(parents=True)
     shutil.copytree(TESTS / "godot", PROJECT, ignore=shutil.ignore_patterns(".godot"))
-    shutil.copytree(REPO / "addons" / "blender_bridge", PROJECT / "addons" / "blender_bridge")
+    shutil.copytree(REPO / "addons" / "blenderang", PROJECT / "addons" / "blenderang")
     if tools.terrain3d is not None:
         _link_or_copy(tools.terrain3d, PROJECT / "addons" / "terrain_3d")
     else:

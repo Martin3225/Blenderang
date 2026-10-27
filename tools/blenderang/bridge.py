@@ -268,7 +268,7 @@ def _resolve_source(entry: dict[str, Any], root: str) -> tuple[bpy.types.Collect
             return _link_library_collection(os.path.join(root, relative), stem), relative
         except (OSError, BridgeError) as error:
             # A broken or empty .blend must not crash opening the whole scene.
-            print("Blender Bridge: cannot load source %s (%s), using the .glb preview" % (relative, error))
+            print("Blenderang: cannot load source %s (%s), using the .glb preview" % (relative, error))
     return _preview_collection(entry, root), ""
 
 
@@ -321,7 +321,7 @@ WARNINGS: list[str] = []
 
 def warn(message: str) -> None:
     WARNINGS.append(message)
-    print("Blender Bridge:", message)
+    print("Blenderang:", message)
 
 
 def build(scene: bpy.types.Scene, manifest_path: str) -> dict[str, int]:
@@ -727,7 +727,7 @@ def _pointer_path() -> str:
     The model's source can be outside the project (personal source), so the marker
     can't be found by walking folders up from the open file.
     """
-    return os.path.join(bpy.utils.user_resource("CONFIG", create=True), "blender_bridge_edit.json")
+    return os.path.join(bpy.utils.user_resource("CONFIG", create=True), "blenderang_edit.json")
 
 
 def begin_edit(scene: bpy.types.Scene, obj: bpy.types.Object) -> str:

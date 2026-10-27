@@ -160,7 +160,7 @@ static func commit(root: Node, ops: Array[Dictionary], undo: EditorUndoRedoManag
 	if ops.is_empty():
 		return
 	var runner: BBApply = BBApply.new()
-	undo.create_action("Blender Bridge: import z Blenderu", UndoRedo.MERGE_DISABLE, root)
+	undo.create_action("Blenderang: import from Blender", UndoRedo.MERGE_DISABLE, root)
 	undo.add_do_method(runner, &"execute", ops)
 	undo.add_undo_method(runner, &"revert", ops)
 	undo.add_do_reference(runner)

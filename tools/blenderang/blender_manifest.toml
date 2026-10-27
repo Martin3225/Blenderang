@@ -1,13 +1,13 @@
 schema_version = "1.0.0"
 
-id = "blender_bridge"
+id = "blenderang"
 version = "0.1.0"
-name = "Blender Bridge"
+name = "Blenderang"
 tagline = "Round-trip Godot scenes through Blender"
 maintainer = "JanekRPG"
 type = "add-on"
 
-website = "https://github.com/"
+website = "https://github.com/Martin3225/Blenderang"
 tags = ["Import-Export", "Scene"]
 
 blender_version_min = "4.2.0"

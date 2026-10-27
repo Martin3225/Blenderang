@@ -82,7 +82,7 @@ static func write_local(asset_path: String, absolute_path: String) -> bool:
 		marker.close()
 	var file: FileAccess = FileAccess.open(LOCAL_SOURCES, FileAccess.WRITE)
 	if file == null:
-		push_error("Blender Bridge: nelze zapsat %s" % LOCAL_SOURCES)
+		push_error("Blenderang: cannot write %s" % LOCAL_SOURCES)
 		return false
 	file.store_string(JSON.stringify(sources, "\t"))
 	file.close()
@@ -128,7 +128,7 @@ static func write_override(asset_path: String, blend_path: String) -> bool:
 		return true
 	var file: FileAccess = FileAccess.open(marker, FileAccess.WRITE)
 	if file == null:
-		push_error("Blender Bridge: nelze zapsat %s" % marker)
+		push_error("Blenderang: cannot write %s" % marker)
 		return false
 	file.store_string(blend_path.trim_prefix("res://"))
 	file.close()

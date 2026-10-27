@@ -4,7 +4,7 @@ import math
 
 import bpy
 
-import blender_bridge.bridge as bridge
+import blenderang.bridge as bridge
 from harness import BridgeCase
 
 

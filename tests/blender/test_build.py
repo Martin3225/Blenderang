@@ -5,7 +5,7 @@ import os
 
 import bpy
 
-import blender_bridge.bridge as bridge
+import blenderang.bridge as bridge
 from harness import ASSETS, BridgeCase, godot_to_blender_point
 import harness
 

@@ -18,10 +18,10 @@ import bpy
 args = sys.argv[sys.argv.index("--") + 1:]
 options = dict(zip(args[::2], args[1::2]))
 sys.path.insert(0, os.path.join(options["--repo"], "tools"))
-import blender_bridge  # noqa: E402
+import blenderang  # noqa: E402
 
-blender_bridge.register()
-import blender_bridge.bridge as bridge  # noqa: E402
+blenderang.register()
+import blenderang.bridge as bridge  # noqa: E402
 
 OUT = options["--out"]
 results = []
@@ -33,9 +33,9 @@ def record(name, passed, message=""):
                     "message": "" if passed else message})
 
 
-class BB_PT_probe(blender_bridge.BB_PT_panel):
+class BB_PT_probe(blenderang.BB_PT_panel):
     """The same panel in the Item tab (visible in the sidebar by default), so it
-    draws without clicking the Bridge tab. Records exceptions from draw()."""
+    draws without clicking the Blenderang tab. Records exceptions from draw()."""
 
     bl_idname = "BB_PT_probe"
     bl_category = "Item"
@@ -49,7 +49,7 @@ class BB_PT_probe(blender_bridge.BB_PT_panel):
             drawn.append((mode, traceback.format_exc(limit=2)))
 
 
-class BB_PT_probe_detail(blender_bridge.BB_PT_detail):
+class BB_PT_probe_detail(blenderang.BB_PT_detail):
     """Detail panel in the Item tab, recording exceptions."""
 
     bl_idname = "BB_PT_probe_detail"

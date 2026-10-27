@@ -7,7 +7,7 @@ extends EditorPlugin
 ##   BB_FAKE_BLENDER  program that records its arguments instead of Blender
 ## Without BB_TEST_EDITOR the plugin does nothing, so the project opens normally.
 
-const BRIDGE_SCRIPT: String = "addons/blender_bridge/plugin.gd"
+const BRIDGE_SCRIPT: String = "addons/blenderang/plugin.gd"
 const WATCH_WAIT: float = 2.5
 const DEADLINE: float = 90.0
 
@@ -116,7 +116,7 @@ func _phase_restart(bridge: EditorPlugin) -> void:
 
 func _phase_context_menu(bridge: EditorPlugin) -> void:
 	var opened: Array[String] = []
-	var menu: EditorContextMenuPlugin = load("res://addons/blender_bridge/bb_context_menu.gd").new(
+	var menu: EditorContextMenuPlugin = load("res://addons/blenderang/bb_context_menu.gd").new(
 		func(path: String) -> void: opened.append(path))
 	menu.call("_on_pressed", PackedStringArray(["res://fixtures/scenes/second.tscn"]))
 	menu.call("_on_pressed", EditorInterface.get_edited_scene_root())

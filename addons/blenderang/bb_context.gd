@@ -39,7 +39,7 @@ static func write(root: Node, manifest: Dictionary, manifest_path: String) -> St
 		err = document.write_to_filesystem(state, ProjectSettings.globalize_path(path))
 	tree.free()
 	if err != OK:
-		push_error("Blender Bridge: could not write the scene context (%d)" % err)
+		push_error("Blenderang: could not write the scene context (%d)" % err)
 		return ""
 	return path
 

@@ -6,7 +6,7 @@ import unittest
 
 from mathutils import Euler, Matrix, Vector
 
-import blender_bridge.bridge as bridge
+import blenderang.bridge as bridge
 
 
 def godot_xform(basis_columns, origin):

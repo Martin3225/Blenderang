@@ -12,10 +12,10 @@ import bpy
 args = sys.argv[sys.argv.index("--") + 1:]
 options = dict(zip(args[::2], args[1::2]))
 sys.path.insert(0, os.path.join(options["--repo"], "tools"))
-import blender_bridge  # noqa: E402
+import blenderang  # noqa: E402
 
-blender_bridge.register()
-import blender_bridge.bridge as bridge  # noqa: E402
+blenderang.register()
+import blenderang.bridge as bridge  # noqa: E402
 
 OUT = options["--out"]
 results = []

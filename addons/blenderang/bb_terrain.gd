@@ -14,11 +14,11 @@ extends RefCounted
 ## Baking is expensive, so the mesh and texture are cached next to the manifest and
 ## recomputed only when the terrain data, its material or the settings change.
 ##
-## Resolution is in [code]Project Settings ▸ Blender Bridge ▸ Terrain[/code],
+## Resolution is in [code]Project Settings ▸ Blenderang ▸ Terrain[/code],
 ## and applies to the whole team.
 
-const SETTING_SPACING: String = "blender_bridge/terrain/mesh_spacing_m"
-const SETTING_TEXTURE: String = "blender_bridge/terrain/texture_size"
+const SETTING_SPACING: String = "blenderang/terrain/mesh_spacing_m"
+const SETTING_TEXTURE: String = "blenderang/terrain/texture_size"
 ## Distance between mesh vertices in metres. Terrain3D bakes in powers of two
 ## of its vertex spacing (LOD 0–8).
 const DEFAULT_SPACING: int = 8
@@ -98,7 +98,7 @@ static func _bake_mesh(terrain: Node3D, lod: int) -> ArrayMesh:
 	var arrays: Array = baked.surface_get_arrays(0)
 	var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 	if vertices.size() > WARN_VERTICES:
-		push_warning("Blender Bridge: terrain has %d vertices, Blender will be slow. Lower %s." % [vertices.size(), SETTING_SPACING])
+		push_warning("Blenderang: terrain has %d vertices, Blender will be slow. Lower %s." % [vertices.size(), SETTING_SPACING])
 	var uvs: PackedVector2Array = PackedVector2Array()
 	uvs.resize(vertices.size())
 	for index: int in vertices.size():

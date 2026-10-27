@@ -52,7 +52,7 @@ static func baseline_path(root: Node) -> String:
 static func write(root: Node) -> String:
 	var dir_err: Error = DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(PIPELINE_DIR))
 	if dir_err != OK and dir_err != ERR_ALREADY_EXISTS:
-		push_error("Blender Bridge: cannot create %s (%d)" % [PIPELINE_DIR, dir_err])
+		push_error("Blenderang: cannot create %s (%d)" % [PIPELINE_DIR, dir_err])
 		return ""
 	_ensure_gdignore()
 	var manifest: Dictionary = export_scene(root)
@@ -69,7 +69,7 @@ static func write(root: Node) -> String:
 static func store(path: String, payload: String) -> bool:
 	var file: FileAccess = FileAccess.open(path, FileAccess.WRITE)
 	if file == null:
-		push_error("Blender Bridge: nelze zapsat %s (%d)" % [path, FileAccess.get_open_error()])
+		push_error("Blenderang: cannot write %s (%d)" % [path, FileAccess.get_open_error()])
 		return false
 	file.store_string(payload)
 	file.close()
