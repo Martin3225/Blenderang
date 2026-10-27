@@ -6,3 +6,4 @@ tests/.cache/
 tests/godot/.godot/
 tests/godot/addons/blenderang
 tests/godot/addons/terrain_3d
+dist/
