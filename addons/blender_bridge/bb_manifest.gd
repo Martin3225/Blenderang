@@ -2,18 +2,18 @@
 class_name BBManifest
 extends RefCounted
 
-## Serializace rozmístění objektů Godot scény do JSON manifestu pro Blender.
+## Serializes the layout of a Godot scene into a JSON manifest for Blender.
 ##
-## Manifest obsahuje pouze transformace a identity, nikdy geometrii. Nody
-## vlastněné Blenderem ([BBOwnership.META_ID]) jsou editovatelné, všechno
-## ostatní jde do Blenderu jako zamčená reference (proxy), aby bylo vidět,
-## kde stojí hráč, terén nebo ručně skládané objekty.
+## The manifest holds only transforms and identities, never geometry. Nodes
+## owned by Blender ([BBOwnership.META_ID]) are editable; everything else
+## goes to Blender as a locked reference (proxy), so you can see where the
+## player, the terrain or hand-assembled objects are.
 
 const FORMAT_VERSION: int = 1
 const PIPELINE_DIR: String = "res://.pipeline"
 
-## Souřadný systém manifestu je Godot: Y nahoru, -Z dopředu, pravotočivý.
-## Převod do Blenderu (Z nahoru) dělá addon na druhé straně.
+## The manifest's coordinate system is Godot's: Y up, -Z forward, right-handed.
+## Conversion to Blender (Z up) is done by the add-on on the other side.
 const COORD_SYSTEM: String = "godot_y_up"
 
 
@@ -46,13 +46,13 @@ static func baseline_path(root: Node) -> String:
 	return manifest_path(root).get_basename() + ".last.json"
 
 
-## Zapíše manifest a vedle něj snímek stavu, proti kterému se při importu
-## počítá diff. Bez snímku by nešlo odlišit „v Blenderu objekt přibyl“ od
-## „v Blenderu objekt chybí, protože ho tam nikdo nikdy neměl“.
+## Writes the manifest and next to it a snapshot of the state that the import
+## diffs against. Without the snapshot you couldn't tell "an object was added in
+## Blender" from "the object is missing in Blender because nobody ever had it there".
 static func write(root: Node) -> String:
 	var dir_err: Error = DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(PIPELINE_DIR))
 	if dir_err != OK and dir_err != ERR_ALREADY_EXISTS:
-		push_error("Blender Bridge: nelze vytvořit %s (%d)" % [PIPELINE_DIR, dir_err])
+		push_error("Blender Bridge: cannot create %s (%d)" % [PIPELINE_DIR, dir_err])
 		return ""
 	_ensure_gdignore()
 	var manifest: Dictionary = export_scene(root)
@@ -93,8 +93,8 @@ static func _walk_children(node: Node, root: Node, walk: Walk) -> void:
 static func _visit(node: Node, root: Node, walk: Walk) -> void:
 	if BBOwnership.is_blender_owned(node):
 		walk.nodes.append(_prop_entry(node, root))
-		# Děti přidané ve scéně (výstroj na armatuře, marker na modelu) jsou
-		# samostatné nody. Vnitřek instancovaného assetu ne — ten patří assetu.
+		# Children added in the scene (gear on an armature, a marker on a model) are
+		# separate nodes. The inside of an instanced asset isn't; that belongs to the asset.
 		for child: Node in node.get_children():
 			if child.owner == root:
 				_visit(child, root, walk)
@@ -106,9 +106,9 @@ static func _visit(node: Node, root: Node, walk: Walk) -> void:
 		_walk_children(node, root, walk)
 		return
 	walk.nodes.append(_proxy_entry(node as Node3D, root))
-	# Proxy se dál nerozbaluje, ale spravované objekty uvnitř (např. budova
-	# zavěšená pod NavigationRegion3D) se najít musí. Terén taky — jeho meshe
-	# jsou interní nody bez ownera a do geometrie rodiče se nedostanou.
+	# A proxy isn't expanded further, but managed objects inside it (e.g. a building
+	# under NavigationRegion3D) must be found. The terrain too: its meshes are
+	# internal nodes without an owner and won't get into the parent's geometry.
 	if _contains_own_entries(node):
 		_walk_children(node, root, walk)
 
@@ -128,8 +128,8 @@ static func _is_terrain(node: Node) -> bool:
 	return node.has_method("get_data_directory")
 
 
-## Organizační Node3D bez skriptu, bez instance a bez vlastního obsahu
-## (Lighting, Models, …) se do manifestu nedostane, jen se jím projde.
+## An organisational Node3D with no script, no instance and no content of its
+## own (Lighting, Models, …) isn't put into the manifest, only walked through.
 static func _is_container(node: Node) -> bool:
 	if node.get_class() != "Node3D":
 		return false
@@ -150,8 +150,8 @@ static func _prop_entry(node: Node, root: Node) -> Dictionary:
 		"xform": _serialize_xform(global_xform(node3d, root)),
 		"tier": BBPaths.tier_for(node.scene_file_path),
 	}
-	# Obálka slouží jako kontext při úpravě jiného assetu v jeho vlastním
-	# .blend — je vidět, co stojí kolem, aniž by se cokoli importovalo.
+	# The bounding box serves as context when editing another asset in its own
+	# .blend, so you can see what stands around it without importing anything.
 	if node3d != null:
 		entry["bounds"] = _serialize_aabb(_subtree_aabb(node3d))
 	var source: String = BBPaths.source_for(node.scene_file_path)
@@ -185,11 +185,11 @@ static func _proxy_entry(node: Node3D, root: Node) -> Dictionary:
 	return entry
 
 
-## Transformace vůči kořeni scény. Počítá se ručně, aby funkce fungovala
-## i na stromu, který není přidaný do SceneTree (headless export).
+## Transform relative to the scene root. Computed by hand so the function also
+## works on a tree that isn't added to the SceneTree (headless export).
 ##
-## Node s [code]top_level[/code] (např. Terrain3D) rodiče ignoruje — jeho
-## transformace už je globální.
+## A node with [code]top_level[/code] (e.g. Terrain3D) ignores its parents; its
+## transform is already global.
 static func global_xform(node: Node3D, root: Node) -> Transform3D:
 	if node == null:
 		return Transform3D.IDENTITY
@@ -205,8 +205,8 @@ static func global_xform(node: Node3D, root: Node) -> Transform3D:
 	return xform
 
 
-## Obálka celého podstromu v lokálním prostoru [param node]. Slouží
-## k vygenerování zamčeného proxy tvaru v Blenderu.
+## Bounding box of the whole subtree in the local space of [param node]. Used
+## to generate the locked proxy shape in Blender.
 static func _subtree_aabb(node: Node3D) -> AABB:
 	var result: AABB = AABB()
 	var found: bool = false

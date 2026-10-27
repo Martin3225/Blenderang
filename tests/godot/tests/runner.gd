@@ -1,7 +1,7 @@
 extends SceneTree
 
-## Spustí všechny res://tests/unit/test_*.gd a zapíše výsledky do JSON
-## (cesta za argumentem --out). Pořadí testů je pořadí deklarace v souboru.
+## Runs all res://tests/unit/test_*.gd and writes the results to JSON
+## (path after the --out argument). Test order is declaration order in the file.
 
 const UNIT_DIR: String = "res://tests/unit/"
 

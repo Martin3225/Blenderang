@@ -1,11 +1,11 @@
 @tool
 extends EditorPlugin
 
-## Testy ve skutečném editoru. Řídí je runner proměnnými prostředí:
-##   BB_TEST_EDITOR   fáze (open_and_watch | restart | context_menu)
-##   BB_TEST_OUT      adresář pro výsledky
-##   BB_FAKE_BLENDER  program, který místo Blenderu zapíše své argumenty
-## Bez BB_TEST_EDITOR plugin nedělá nic, takže projekt jde normálně otevřít.
+## Tests in the real editor. The runner drives them with environment variables:
+##   BB_TEST_EDITOR   phase (open_and_watch | restart | context_menu)
+##   BB_TEST_OUT      folder for results
+##   BB_FAKE_BLENDER  program that records its arguments instead of Blender
+## Without BB_TEST_EDITOR the plugin does nothing, so the project opens normally.
 
 const BRIDGE_SCRIPT: String = "addons/blender_bridge/plugin.gd"
 const WATCH_WAIT: float = 2.5
@@ -21,7 +21,7 @@ func _enter_tree() -> void:
 	if _phase.is_empty():
 		return
 	get_tree().create_timer(DEADLINE).timeout.connect(func() -> void:
-		_record("(časový limit)", false, "fáze %s nedoběhla do %d s" % [_phase, DEADLINE])
+		_record("(time limit)", false, "phase %s did not finish within %d s" % [_phase, DEADLINE])
 		_finish()
 	)
 	_run.call_deferred()
@@ -30,7 +30,7 @@ func _enter_tree() -> void:
 func _run() -> void:
 	var root: Node = await _wait_for_scene()
 	var bridge: EditorPlugin = _find_bridge()
-	_record("editor načetl scénu a plugin", root != null and bridge != null, "scéna=%s plugin=%s" % [root, bridge])
+	_record("editor loaded the scene and the plugin", root != null and bridge != null, "scene=%s plugin=%s" % [root, bridge])
 	if root == null or bridge == null:
 		_finish()
 		return
@@ -48,21 +48,21 @@ func _run() -> void:
 	_finish()
 
 
-# ------------------------------------------------------------------ fáze
+# ------------------------------------------------------------------ phases
 
 
 func _phase_open_and_watch(bridge: EditorPlugin) -> void:
 	var button: Button = bridge.get("_toolbar_button")
-	_record("tlačítko Blender je v liště 3D editoru",
+	_record("Blender button is in the 3D editor toolbar",
 		button != null and button.is_inside_tree() and button.get_parent() != null, "")
 
 	button.pressed.emit()
 	var args: PackedStringArray = await _fake_blender_args()
 	var manifest: String = ProjectSettings.globalize_path("res://.pipeline/basic.json")
-	_record("tlačítko spustí Blender s manifestem",
+	_record("the button launches Blender with the manifest",
 		args.size() == 2 and args[0] == "--python-expr" and args[1].contains(JSON.stringify(manifest)),
 		"argumenty: %s" % [args])
-	_record("startovní Python volá bb.open_from_godot", args.size() == 2 and args[1].contains("bpy.ops.bb.open_from_godot"), "")
+	_record("startup Python calls bb.open_from_godot", args.size() == 2 and args[1].contains("bpy.ops.bb.open_from_godot"), "")
 
 	var root: Node = EditorInterface.get_edited_scene_root()
 	var marked: PackedStringArray = []
@@ -70,48 +70,48 @@ func _phase_open_and_watch(bridge: EditorPlugin) -> void:
 		if BBOwnership.is_blender_owned(node):
 			marked.append(str(node.name))
 	marked.sort()
-	_record("první otevření označí art instance",
-		marked == PackedStringArray(["Barrel", "Character", "Crate", "Detached", "Helmet", "InRotated", "Tower"]), "označeno: %s" % [marked])
+	_record("first open marks art instances",
+		marked == PackedStringArray(["Barrel", "Character", "Crate", "Detached", "Helmet", "InRotated", "Tower"]), "marked: %s" % [marked])
 
 	var saved: String = FileAccess.get_file_as_string("res://fixtures/scenes/basic.tscn")
-	_record("scéna je uložená i se značkami", saved.count("metadata/bb_id") == 7, "bb_id v souboru: %d" % saved.count("metadata/bb_id"))
-	# V editoru glTF export přeskakuje nody bez ownera — tady se to projeví,
-	# mimo editor ne.
+	_record("the scene is saved with the marks", saved.count("metadata/bb_id") == 7, "bb_id in file: %d" % saved.count("metadata/bb_id"))
+	# In the editor glTF export skips nodes without an owner; this shows up here,
+	# not outside the editor.
 	var context: Dictionary = _glb_json("res://.pipeline/basic.context.glb")
 	var names: PackedStringArray = []
 	for node: Dictionary in context.get("nodes", []):
 		names.append(str(node.get("name", "")))
-	_record("kontext z editoru obsahuje geometrii scény",
+	_record("context from the editor contains the scene geometry",
 		names.has("Building") and names.has("Player") and context.get("meshes", []).size() >= 3,
-		"nody: %s, meshe: %d" % [names, context.get("meshes", []).size()])
+		"nodes: %s, meshes: %d" % [names, context.get("meshes", []).size()])
 
 	var crate: Node3D = root.get_node("Props/Crate")
 	var history: UndoRedo = _history(root)
 	var version: int = history.get_version()
 	await get_tree().create_timer(WATCH_WAIT).timeout
-	_record("vlastní zápis manifestu se nenačítá zpět", history.get_version() == version and crate.position.is_equal_approx(Vector3(2, 0, 3)),
+	_record("own manifest write is not loaded back", history.get_version() == version and crate.position.is_equal_approx(Vector3(2, 0, 3)),
 		"verze historie %d → %d" % [version, history.get_version()])
 
 	_move_in_manifest("res://.pipeline/basic.json", "Crate", Vector3(7, 0, 3))
 	var started: int = Time.get_ticks_msec()
 	while not crate.position.is_equal_approx(Vector3(7, 0, 3)) and Time.get_ticks_msec() - started < WATCH_WAIT * 1000:
 		await get_tree().process_frame
-	_record("změna z Blenderu se načte sama", crate.position.is_equal_approx(Vector3(7, 0, 3)),
-		"pozice %s po %d ms" % [crate.position, Time.get_ticks_msec() - started])
+	_record("a change from Blender loads automatically", crate.position.is_equal_approx(Vector3(7, 0, 3)),
+		"position %s after %d ms" % [crate.position, Time.get_ticks_msec() - started])
 
 	history.undo()
-	_record("Ctrl+Z vrátí načtenou změnu jedním krokem", crate.position.is_equal_approx(Vector3(2, 0, 3)), "pozice %s" % crate.position)
+	_record("Ctrl+Z undoes the loaded change in one step", crate.position.is_equal_approx(Vector3(2, 0, 3)), "position %s" % crate.position)
 
 
 func _phase_restart(bridge: EditorPlugin) -> void:
-	# Runner před startem posunul Crate v manifestu na (9, 0, 3).
+	# Before starting, the runner moved Crate in the manifest to (9, 0, 3).
 	var root: Node = EditorInterface.get_edited_scene_root()
 	var crate: Node3D = root.get_node("Props/Crate")
 	await get_tree().create_timer(WATCH_WAIT).timeout
-	_record("starý manifest se po startu editoru nenačte naslepo", crate.position.is_equal_approx(Vector3(2, 0, 3)), "pozice %s" % crate.position)
+	_record("an old manifest isn't loaded blindly after the editor starts", crate.position.is_equal_approx(Vector3(2, 0, 3)), "position %s" % crate.position)
 
 	bridge.call("_import", root, false)
-	_record("ruční načtení změn funguje", crate.position.is_equal_approx(Vector3(9, 0, 3)), "pozice %s" % crate.position)
+	_record("loading changes manually works", crate.position.is_equal_approx(Vector3(9, 0, 3)), "position %s" % crate.position)
 
 
 func _phase_context_menu(bridge: EditorPlugin) -> void:
@@ -120,30 +120,30 @@ func _phase_context_menu(bridge: EditorPlugin) -> void:
 		func(path: String) -> void: opened.append(path))
 	menu.call("_on_pressed", PackedStringArray(["res://fixtures/scenes/second.tscn"]))
 	menu.call("_on_pressed", EditorInterface.get_edited_scene_root())
-	_record("kontextové menu pozná cestu ze souboru i z tabu scény",
+	_record("context menu gets the path from a file and from a scene tab",
 		opened == ["res://fixtures/scenes/second.tscn", "res://fixtures/scenes/basic.tscn"], "dostal %s" % [opened])
 
 	bridge.call("open_scene_in_blender", "res://fixtures/scenes/second.tscn")
 	var args: PackedStringArray = await _fake_blender_args()
 	var root: Node = EditorInterface.get_edited_scene_root()
-	_record("neaktivní scéna se nejdřív otevře", root != null and root.scene_file_path == "res://fixtures/scenes/second.tscn",
-		"aktivní: %s" % (root.scene_file_path if root else "nic"))
-	_record("Blender dostane manifest druhé scény", args.size() == 2 and args[1].contains("second.json"), "argumenty: %s" % [args])
-	_record("druhá scéna je uložená se značkou",
+	_record("an inactive scene is opened first", root != null and root.scene_file_path == "res://fixtures/scenes/second.tscn",
+		"active: %s" % (root.scene_file_path if root else "none"))
+	_record("Blender gets the second scene's manifest", args.size() == 2 and args[1].contains("second.json"), "arguments: %s" % [args])
+	_record("the second scene is saved with a mark",
 		FileAccess.get_file_as_string("res://fixtures/scenes/second.tscn").count("metadata/bb_id") == 1, "")
 
 
-## Ctrl+S ve zdroji modelu přepíše jeho .glb a Godot ho reimportuje, zatímco
-## je scéna otevřená. Další otevření v Blenderu musí dát stejný manifest.
+## Ctrl+S in a model's source rewrites its .glb and Godot reimports it while
+## the scene is open. The next open in Blender must give the same manifest.
 func _phase_reimport(bridge: EditorPlugin) -> void:
 	var button: Button = bridge.get("_toolbar_button")
 	button.pressed.emit()
 	await _fake_blender_args()
 	var before: Dictionary = _manifest_summary("res://.pipeline/terrain.json")
-	_record("první otevření: model i terén", before["models"] == ["CrateOnHill"] and before["terrain"] and before["terrain_mesh"],
+	_record("first open: model and terrain", before["models"] == ["CrateOnHill"] and before["terrain"] and before["terrain_mesh"],
 		"%s" % before)
 
-	# Co udělá Ctrl+S v Blenderu: zdroj vedle assetu a nový .glb.
+	# What Ctrl+S in Blender does: a source next to the asset and a new .glb.
 	var asset: String = "res://fixtures/assets/crate.glb"
 	var original: PackedByteArray = FileAccess.get_file_as_bytes(asset)
 	DirAccess.copy_absolute(ProjectSettings.globalize_path("res://fixtures/assets/tower.glb"), ProjectSettings.globalize_path(asset))
@@ -154,20 +154,20 @@ func _phase_reimport(bridge: EditorPlugin) -> void:
 
 	var root: Node = EditorInterface.get_edited_scene_root()
 	var crate: Node = root.get_node_or_null("Nav/CrateOnHill")
-	_record("model po reimportu zůstane označený", crate != null and BBOwnership.is_blender_owned(crate),
+	_record("the model stays marked after reimport", crate != null and BBOwnership.is_blender_owned(crate),
 		"CrateOnHill=%s meta=%s" % [crate, crate.get_meta_list() if crate else []])
 
 	button.pressed.emit()
 	await _fake_blender_args()
 	var after: Dictionary = _manifest_summary("res://.pipeline/terrain.json")
-	_record("další otevření po reimportu: model i terén", after["models"] == ["CrateOnHill"] and after["terrain"] and after["terrain_mesh"],
+	_record("next open after reimport: model and terrain", after["models"] == ["CrateOnHill"] and after["terrain"] and after["terrain_mesh"],
 		"%s" % after)
-	# Nové id by znamenalo, že ho označil až první-otevření záchranou; ve scéně
-	# s víc modely by se neoznačil vůbec a NavigationRegion3D by spolkl terén.
-	_record("model si po reimportu nechá své id", after["ids"] == before["ids"], "před %s, po %s" % [before["ids"], after["ids"]])
-	_record("model po reimportu je nalinkovaný ze zdroje", after["tiers"] == ["library"], "%s" % after)
+	# A new id would mean it was only marked by the first-open fallback; in a scene
+	# with more models it wouldn't be marked at all and NavigationRegion3D would swallow the terrain.
+	_record("the model keeps its id after reimport", after["ids"] == before["ids"], "before %s, after %s" % [before["ids"], after["ids"]])
+	_record("the model is linked from its source after reimport", after["tiers"] == ["library"], "%s" % after)
 
-	# Další sady sdílí import cache — asset musí zůstat původní.
+	# Other suites share the import cache, so the asset must stay the original.
 	var file: FileAccess = FileAccess.open(asset, FileAccess.WRITE)
 	file.store_buffer(original)
 	file.close()
@@ -175,9 +175,9 @@ func _phase_reimport(bridge: EditorPlugin) -> void:
 	await _reimport(asset)
 
 
-## Reimport natvrdo: scan() by změnu ve stejné sekundě (stejný mtime)
-## přehlédl a čekání by nikdy neskončilo. Jde přes stejné signály jako
-## reimport po uložení z Blenderu.
+## Hard reimport: scan() would miss a change within the same second (same mtime)
+## and the wait would never end. Goes through the same signals as a
+## reimport after saving from Blender.
 func _reimport(asset: String) -> void:
 	EditorInterface.get_resource_filesystem().reimport_files(PackedStringArray([asset]))
 	for _frame: int in 30:
@@ -203,7 +203,7 @@ func _manifest_summary(path: String) -> Dictionary:
 	return {"models": models, "ids": ids, "tiers": tiers, "terrain": terrain, "terrain_mesh": names.has("TerrainMesh"), "context": names}
 
 
-# --------------------------------------------------------------- pomůcky
+# ------------------------------------------------------------------ helpers
 
 
 func _wait_for_scene() -> Node:
@@ -236,13 +236,13 @@ func _fake_blender_args() -> PackedStringArray:
 			await get_tree().create_timer(0.2).timeout
 			var lines: PackedStringArray = FileAccess.get_file_as_string(record).strip_edges().split("\n")
 			DirAccess.remove_absolute(record)
-			# Python výraz je víceřádkový; první řádek je přepínač, zbytek výraz.
+			# The Python expression is multi-line; the first line is the switch, the rest the expression.
 			return PackedStringArray([lines[0], "\n".join(lines.slice(1))]) if lines.size() > 1 else lines
 		await get_tree().create_timer(0.05).timeout
 	return PackedStringArray()
 
 
-## JSON část .glb souboru (bez binárního bufferu).
+## JSON part of a .glb file (without the binary buffer).
 func _glb_json(path: String) -> Dictionary:
 	var bytes: PackedByteArray = FileAccess.get_file_as_bytes(path)
 	if bytes.size() < 20:

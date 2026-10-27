@@ -1,4 +1,4 @@
-"""Odeslání změn z Blenderu do manifestu (Blender → Godot)."""
+"""Sending changes from Blender to the manifest (Blender → Godot)."""
 
 import math
 
@@ -21,7 +21,7 @@ class ExportTest(BridgeCase):
         self.assertEqual(
             [e for e in after["nodes"] if e.get("owner") != "blender"],
             [e for e in original["nodes"] if e.get("owner") != "blender"],
-            "Godot část manifestu se nesmí změnit",
+            "the Godot part of the manifest must not change",
         )
         self.assertEqual(after["context_glb"], original["context_glb"])
 
@@ -45,16 +45,16 @@ class ExportTest(BridgeCase):
         tower.scale = (1, 1, 3)
         self.send()
         x = self.entry(self.read_manifest(), "Tower")["xform"]
-        # Basis.x po otočení o 90° kolem svislé osy míří v Godotu na −Z.
+        # After a 90° turn around the vertical axis, Basis.x points to −Z in Godot.
         self.assertAlmostEqual(x[0], 0.0, places=4)
         self.assertAlmostEqual(x[2], -1.0, places=4)
-        # Měřítko 3 v Blenderu na Z je v Godotu na Y.
+        # Scale 3 on Z in Blender is on Y in Godot.
         self.assertAlmostEqual(x[4], 3.0, places=4)
 
     def test_duplicate_gets_new_id_and_same_parent(self):
         self.open_scene()
         tower = bpy.data.objects["Tower"]
-        copy = tower.copy()   # Shift+D zkopíruje i custom properties
+        copy = tower.copy()   # Shift+D copies custom properties too
         copy.name = "TowerCopy"
         bpy.data.collections[bridge.COLL_LAYOUT].objects.link(copy)
         copy.location.x += 5
@@ -62,14 +62,14 @@ class ExportTest(BridgeCase):
         self.assertEqual(counts["added"], 1)
         manifest = self.read_manifest()
         ids = [e["bb_id"] for e in manifest["nodes"] if e.get("owner") == "blender"]
-        self.assertEqual(len(ids), len(set(ids)), "id musí být unikátní")
+        self.assertEqual(len(ids), len(set(ids)), "ids must be unique")
         added = self.entry(manifest, "TowerCopy")
         original = self.entry(manifest, "Tower")
         self.assertNotEqual(added["bb_id"], original["bb_id"])
         self.assertEqual(added["parent"], "Props")
         self.assertEqual(added["src"], original["src"])
-        self.assertEqual(copy.get(bridge.P_ID), added["bb_id"], "objekt si nové id pamatuje")
-        # Druhé odeslání už nesmí přidávat znovu.
+        self.assertEqual(copy.get(bridge.P_ID), added["bb_id"], "the object remembers its new id")
+        # A second send must not add it again.
         self.assertEqual(self.send()["added"], 0)
 
     def test_delete_is_sent(self):
@@ -82,7 +82,7 @@ class ExportTest(BridgeCase):
 
     def test_helper_objects_are_not_sent(self):
         self.open_scene()
-        helper = bpy.data.objects.new("Pomocna", bpy.data.meshes.new("pomocna"))
+        helper = bpy.data.objects.new("Helper", bpy.data.meshes.new("helper"))
         bpy.context.scene.collection.objects.link(helper)
         before = len(self.read_manifest()["nodes"])
         self.send()

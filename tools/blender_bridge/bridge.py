@@ -1,11 +1,11 @@
-"""Jádro mostu mezi Godot manifestem a Blender scénou.
+"""Core of the bridge between the Godot manifest and the Blender scene.
 
-Manifest nese pouze identity a transformace. Geometrie se nikdy nepřenáší —
-assety se do Blenderu linkují ze svých zdrojových .blend souborů, nebo se
-naimportují z .glb jako náhled.
+The manifest carries only identities and transforms. Geometry is never
+transferred: assets are linked into Blender from their source .blend files,
+or imported from .glb as a preview.
 
-Scéna sama žádný .blend nemá. Rozmístění je vždycky v .tscn a Blender si ho
-pokaždé postaví z manifestu, takže se s Godotem nemůže rozejít.
+The scene itself has no .blend. The layout always lives in the .tscn and Blender
+builds it from the manifest every time, so it can't drift out of sync with Godot.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from typing import Any
 import bpy
 from mathutils import Matrix, Vector
 
-# Vlastní properties, podle kterých addon pozná svoje objekty.
+# Custom properties by which the add-on recognises its own objects.
 P_ID = "bb_id"
 P_PATH = "bb_path"
 P_SRC = "bb_src"
@@ -33,23 +33,23 @@ S_WARNINGS = "bb_warnings"
 COLL_LAYOUT = "BB_Layout"
 COLL_LOCKED = "BB_Locked"
 
-# Godot: X vpravo, Y nahoru, -Z dopředu. Blender: X vpravo, Y dopředu, Z nahoru.
-# Převod báze mezi soustavami; matice je ortogonální, takže inverze == transpozice.
+# Godot: X right, Y up, -Z forward. Blender: X right, Y forward, Z up.
+# Basis change between the systems; the matrix is orthogonal, so inverse == transpose.
 _AXIS = Matrix(((1.0, 0.0, 0.0), (0.0, 0.0, -1.0), (0.0, 1.0, 0.0)))
 _AXIS_INV = _AXIS.transposed()
 
 
 class BridgeError(Exception):
-    """Chyba, kterou má smysl ukázat uživateli v hlášce operátoru."""
+    """An error worth showing to the user in an operator report."""
 
 
-# ---------------------------------------------------------------- transformace
+# ---------------------------------------------------------------- transforms
 
 
 def godot_to_blender(xform: list[float]) -> Matrix:
-    """12 floatů z manifestu (tři sloupce báze, pak origin) na Blender matici."""
+    """12 floats from the manifest (three basis columns, then origin) to a Blender matrix."""
     if len(xform) != 12:
-        raise BridgeError("transformace musí mít 12 složek, má %d" % len(xform))
+        raise BridgeError("a transform must have 12 components, it has %d" % len(xform))
     basis = Matrix((
         (xform[0], xform[3], xform[6]),
         (xform[1], xform[4], xform[7]),
@@ -61,7 +61,7 @@ def godot_to_blender(xform: list[float]) -> Matrix:
 
 
 def blender_to_godot(matrix: Matrix) -> list[float]:
-    """Opačný směr; výstup je přímo pole pro manifest."""
+    """The opposite direction; the output is the array for the manifest."""
     basis = _AXIS_INV @ matrix.to_3x3() @ _AXIS
     origin = _AXIS_INV @ matrix.to_translation()
     return [
@@ -72,16 +72,16 @@ def blender_to_godot(matrix: Matrix) -> list[float]:
     ]
 
 
-# --------------------------------------------------------------------- soubory
+# ----------------------------------------------------------------------- files
 
 
 def load_manifest(path: str) -> dict[str, Any]:
     if not os.path.isfile(path):
-        raise BridgeError("manifest neexistuje: %s" % path)
+        raise BridgeError("manifest does not exist: %s" % path)
     with open(path, "r", encoding="utf-8") as handle:
         data = json.load(handle)
     if data.get("format") != 1:
-        raise BridgeError("neznámá verze manifestu: %r" % data.get("format"))
+        raise BridgeError("unknown manifest version: %r" % data.get("format"))
     return data
 
 
@@ -92,30 +92,30 @@ def save_manifest(path: str, data: dict[str, Any]) -> None:
 
 
 def project_root_for(manifest_path: str) -> str:
-    """Manifest leží v ``<kořen>/.pipeline/<scéna>.json``."""
+    """The manifest lives in ``<root>/.pipeline/<scene>.json``."""
     pipeline = os.path.dirname(os.path.abspath(manifest_path))
     if os.path.basename(pipeline) != ".pipeline":
-        raise BridgeError("manifest musí ležet v adresáři .pipeline, je v %s" % pipeline)
+        raise BridgeError("the manifest must be in the .pipeline folder, it is in %s" % pipeline)
     return os.path.dirname(pipeline)
 
 
 def stored_manifest_path(scene: bpy.types.Scene) -> str:
     path = scene.get(S_MANIFEST, "")
     if not path:
-        raise BridgeError("tato scéna nemá načtený manifest")
+        raise BridgeError("this scene has no manifest loaded")
     return path
 
 
-# ------------------------------------------------------------------ kontext
+# ------------------------------------------------------------------ context
 
 
 def ui_context() -> dict[str, Any]:
-    """Kontext 3D pohledu pro ``temp_override``.
+    """3D view context for ``temp_override``.
 
-    Godot spouští stavbu scény z časovače a handlery běží po načtení
-    souboru; ani jedno nemá okno ani 3D pohled. glTF importér si ale u modelů
-    s armaturou sahá na ``bpy.context.object`` a bez 3D pohledu spadne.
-    Na pozadí (testy, ``--background``) se nic nepřebíjí.
+    Godot starts the scene build from a timer and handlers run after a file
+    loads; neither has a window or a 3D view. But the glTF importer reaches for
+    ``bpy.context.object`` on models with an armature and crashes without a 3D view.
+    In the background (tests, ``--background``) nothing is overridden.
     """
     manager = bpy.context.window_manager
     if bpy.app.background or manager is None or not manager.windows:
@@ -131,7 +131,7 @@ def ui_context() -> dict[str, Any]:
     return {"window": window, "screen": window.screen, "scene": window.scene, "view_layer": window.view_layer}
 
 
-# ------------------------------------------------------------------- kolekce
+# --------------------------------------------------------------- collections
 
 
 def _ensure_collection(parent: bpy.types.Collection, name: str) -> bpy.types.Collection:
@@ -146,12 +146,12 @@ def _ensure_collection(parent: bpy.types.Collection, name: str) -> bpy.types.Col
 
 
 def _same_file(left: str, right: str) -> bool:
-    """Windows má cesty case-insensitive a míchá oddělovače."""
+    """Windows paths are case-insensitive and mix separators."""
     return os.path.normcase(os.path.abspath(left)) == os.path.normcase(os.path.abspath(right))
 
 
 def _link_library_collection(blend_path: str, name: str) -> bpy.types.Collection:
-    """Nalinkuje kolekci ze zdrojového .blend. Opakované volání nelinkuje znovu."""
+    """Links the collection from the source .blend. Repeated calls don't link again."""
     for collection in bpy.data.collections:
         library = collection.library
         if library is None:
@@ -161,25 +161,25 @@ def _link_library_collection(blend_path: str, name: str) -> bpy.types.Collection
     with bpy.data.libraries.load(blend_path, link=True) as (data_from, data_to):
         available = list(data_from.collections)
         if not available:
-            raise BridgeError("%s neobsahuje žádnou kolekci" % blend_path)
+            raise BridgeError("%s contains no collection" % blend_path)
         picked = name if name in available else available[0]
         data_to.collections = [picked]
     linked = data_to.collections[0]
     if linked is None:
-        raise BridgeError("nepodařilo se nalinkovat kolekci z %s" % blend_path)
+        raise BridgeError("could not link a collection from %s" % blend_path)
     return linked
 
 
-# glTF importér si pro tvary kostí armatury zakládá pomocné objekty
-# v kolekci „glTF_not_exported“. Patří jen kostem, ne do scény.
+# The glTF importer creates helper objects for armature bone shapes
+# in a "glTF_not_exported" collection. They belong to the bones, not the scene.
 _IMPORTER_HELPERS = "glTF_not_exported"
 
 
 def _import_file(path: str) -> tuple[list[bpy.types.Object], list[bpy.types.Object]]:
-    """Naimportuje .glb/.gltf/.fbx a vrátí (objekty, pomocné objekty importéru).
+    """Imports a .glb/.gltf/.fbx and returns (objects, importer helper objects).
 
-    Všechny nové objekty odpojí ze scény — volající rozhodne, kam patří.
-    Kolekce, které si importér založil, po sobě uklidí.
+    Unlinks all new objects from the scene; the caller decides where they belong.
+    Cleans up any collections the importer created.
     """
     extension = os.path.splitext(path)[1].lower()
     objects_before = set(bpy.data.objects)
@@ -190,9 +190,9 @@ def _import_file(path: str) -> tuple[list[bpy.types.Object], list[bpy.types.Obje
         elif extension == ".fbx":
             bpy.ops.import_scene.fbx(filepath=path)
         else:
-            raise BridgeError("nepodporovaný formát")
+            raise BridgeError("unsupported format")
     except (RuntimeError, BridgeError) as error:
-        # Po neúspěšném importu nesmí ve scéně nic zůstat napůl.
+        # After a failed import nothing may be left half-done in the scene.
         for obj in set(bpy.data.objects) - objects_before:
             bpy.data.objects.remove(obj, do_unlink=True)
         for collection in set(bpy.data.collections) - collections_before:
@@ -212,10 +212,10 @@ def _import_file(path: str) -> tuple[list[bpy.types.Object], list[bpy.types.Obje
 
 
 def _preview_collection(entry: dict[str, Any], root: str) -> bpy.types.Collection | None:
-    """Kolekce s modelem naimportovaným z .glb pro asset bez zdrojového .blend.
+    """Collection with the model imported from .glb for an asset with no source .blend.
 
-    Kolekce není ve scéně — instance ji ve scéně mít nepotřebuje. Model je
-    tak vidět jen jednou, na místě instance, a nikde se neválí v počátku.
+    The collection isn't in the scene; the instance doesn't need it there. So the
+    model is visible only once, at the instance's place, and never lies around at the origin.
     """
     stem = os.path.basename(entry.get("src", "")).rsplit(".", 1)[0]
     existing = bpy.data.collections.get(stem)
@@ -223,12 +223,12 @@ def _preview_collection(entry: dict[str, Any], root: str) -> bpy.types.Collectio
         return existing
     path = asset_abs(root, entry.get("src", ""))
     if not os.path.isfile(path):
-        warn("%s: asset %s neexistuje" % (entry.get("name"), entry.get("src")))
+        warn("%s: asset %s does not exist" % (entry.get("name"), entry.get("src")))
         return None
     try:
         objects, _ = _import_file(path)
     except BridgeError as error:
-        warn("%s: náhled nejde načíst (%s)" % (entry.get("name"), error))
+        warn("%s: cannot load preview (%s)" % (entry.get("name"), error))
         return None
     collection = bpy.data.collections.new(stem)
     collection[P_PREVIEW] = True
@@ -238,12 +238,12 @@ def _preview_collection(entry: dict[str, Any], root: str) -> bpy.types.Collectio
 
 
 def source_of(entry: dict[str, Any], root: str) -> str:
-    """Cesta ke zdrojovému .blend (relativní k projektu, u osobního zdroje
-    absolutní), nebo prázdno.
+    """Path to the source .blend (relative to the project, absolute for a
+    personal source), or empty.
 
-    Stejné pravidlo jako BBPaths v Godotu: osobní výběr (jen u tebe) →
-    ``<asset>.bbsrc`` (sdílený) → ``.blend`` vedle assetu. Blender ho
-    vyhodnocuje sám, aby nově vybraný zdroj viděl hned.
+    Same rule as BBPaths in Godot: personal choice (only for you) →
+    ``<asset>.bbsrc`` (shared) → ``.blend`` next to the asset. Blender
+    evaluates it itself so it sees a newly picked source right away.
     """
     asset = entry.get("src", "")
     personal = local_sources(root).get(asset, "")
@@ -259,20 +259,20 @@ def source_of(entry: dict[str, Any], root: str) -> str:
 
 
 def _resolve_source(entry: dict[str, Any], root: str) -> tuple[bpy.types.Collection | None, str]:
-    """Kolekce, kterou bude instance ukazovat (nalinkovaný zdroj, nebo náhled)
-    a relativní cesta ke zdroji, pokud existuje."""
+    """The collection the instance will point to (linked source, or preview)
+    and the relative path to the source, if there is one."""
     relative = source_of(entry, root)
     if relative:
         stem = os.path.basename(entry.get("src", "")).rsplit(".", 1)[0]
         try:
             return _link_library_collection(os.path.join(root, relative), stem), relative
         except (OSError, BridgeError) as error:
-            # Poškozený nebo prázdný .blend nesmí shodit otevření celé scény.
-            print("Blender Bridge: zdroj %s nejde načíst (%s), použije se náhled z .glb" % (relative, error))
+            # A broken or empty .blend must not crash opening the whole scene.
+            print("Blender Bridge: cannot load source %s (%s), using the .glb preview" % (relative, error))
     return _preview_collection(entry, root), ""
 
 
-# -------------------------------------------------------------------- stavba
+# --------------------------------------------------------------------- build
 
 
 def _clear_previous(scene: bpy.types.Scene) -> None:
@@ -284,7 +284,7 @@ def _clear_previous(scene: bpy.types.Scene) -> None:
 def _make_proxy_mesh(name: str, bounds: dict[str, Any]) -> bpy.types.Mesh:
     position = Vector(bounds["position"])
     size = Vector(bounds["size"])
-    # Godot AABB je v Godot osách, proxy stavíme rovnou v Blender osách.
+    # The Godot AABB is in Godot axes; we build the proxy directly in Blender axes.
     low = _AXIS @ position
     high = _AXIS @ (position + size)
     minimum = Vector((min(low.x, high.x), min(low.y, high.y), min(low.z, high.z)))
@@ -306,16 +306,16 @@ def _make_proxy_mesh(name: str, bounds: dict[str, Any]) -> bpy.types.Mesh:
 
 
 def lock(obj: bpy.types.Object) -> None:
-    """Kontext z Godotu jde vybrat a zaměřit (numpad .), ale ne posunout.
-    Změny by se stejně do Godotu nepropsaly."""
+    """Context from Godot can be selected and framed (numpad .), but not moved.
+    Changes wouldn't make it to Godot anyway."""
     obj.lock_location = (True, True, True)
     obj.lock_rotation = (True, True, True)
     obj.lock_rotation_w = True
     obj.lock_scale = (True, True, True)
 
 
-# Problémy, které nezastaví stavbu scény (vadný asset, vadný kontext), ale
-# uživatel o nich má vědět. Panel je ukáže, operátor nahlásí.
+# Problems that don't stop the scene build (broken asset, broken context), but
+# the user should know about. The panel shows them, the operator reports them.
 WARNINGS: list[str] = []
 
 
@@ -325,10 +325,10 @@ def warn(message: str) -> None:
 
 
 def build(scene: bpy.types.Scene, manifest_path: str) -> dict[str, int]:
-    """Postaví scénu z manifestu. Existující BB objekty nahradí.
+    """Builds the scene from the manifest. Replaces existing BB objects.
 
-    Jeden vadný soubor nesmí shodit celou stavbu: model bez náhledu zůstane
-    jako osa na svém místě, vadný kontext se nahradí obálkami.
+    One broken file must not crash the whole build: a model without a preview stays
+    as an empty axis at its place, a broken context is replaced by bounding boxes.
     """
     WARNINGS.clear()
     manifest = load_manifest(manifest_path)
@@ -360,8 +360,8 @@ def build(scene: bpy.types.Scene, manifest_path: str) -> dict[str, int]:
 
 
 def _parent_models(models: dict[str, bpy.types.Object]) -> None:
-    """Model, který je v Godotu dítětem jiného modelu (výstroj na armatuře),
-    je v Blenderu jeho potomkem — posun rodiče posune i děti."""
+    """A model that is a child of another model in Godot (gear on an armature)
+    is its child in Blender too, so moving the parent moves the children."""
     for obj in models.values():
         parent = models.get(str(obj.get(P_PARENT, "")))
         if parent is None:
@@ -372,8 +372,8 @@ def _parent_models(models: dict[str, bpy.types.Object]) -> None:
 
 
 def _readable_empties(objects: list[bpy.types.Object], size: float) -> None:
-    """Osy prázdných objektů velké [size] metrů ve světě, bez ohledu na
-    měřítko — glTF importér je dělá stovky metrů velké."""
+    """Empty object axes [size] metres in world space, regardless of
+    scale; the glTF importer makes them hundreds of metres big."""
     bpy.context.view_layer.update()
     for obj in objects:
         if obj.type != "EMPTY":
@@ -388,11 +388,11 @@ def import_context(
     target: bpy.types.Collection,
     matrix: Matrix,
 ) -> int:
-    """Zamčené okolí z Godotu do kolekce [target].
+    """Locked surroundings from Godot into collection [target].
 
-    Skutečná geometrie z ``.context.glb``; starší manifest bez něj dostane
-    obálky z ``bounds``. [matrix] posune celý kontext — při úpravě modelu
-    do jeho lokálního prostoru. Vrací počet nodů z Godotu.
+    Real geometry from ``.context.glb``; an older manifest without it gets
+    bounding boxes from ``bounds``. [matrix] moves the whole context, into the
+    model's local space when editing a model. Returns the number of Godot nodes.
     """
     context_path = os.path.join(root, manifest.get("context_glb", ""))
     godot_entries = [e for e in manifest["nodes"] if e.get("owner") != "blender"]
@@ -401,7 +401,7 @@ def import_context(
         try:
             objects, _ = _import_file(context_path)
         except BridgeError as error:
-            warn("kontext z Godotu nejde načíst (%s), použijí se obálky" % error)
+            warn("cannot load context from Godot (%s), using bounding boxes" % error)
     if objects is not None:
         for obj in objects:
             target.objects.link(obj)
@@ -467,16 +467,16 @@ def _new_id(taken: set[str]) -> str:
 
 
 def export(scene: bpy.types.Scene) -> dict[str, int]:
-    """Zapíše transformace z Blenderu zpět do manifestu.
+    """Writes transforms from Blender back to the manifest.
 
-    Godot-owned položky se přenášejí beze změny — Blender je needituje.
-    Objekty bez ``bb_id`` se ignorují, takže si v layoutu můžeš dělat
-    pomocnou geometrii, aniž by skončila ve hře.
+    Godot-owned entries pass through unchanged; Blender doesn't edit them.
+    Objects without ``bb_id`` are ignored, so you can make helper geometry
+    in the layout without it ending up in the game.
     """
     manifest_path = stored_manifest_path(scene)
     manifest = load_manifest(manifest_path)
-    # matrix_world se po změně location přepočítá až s depsgraphem; ze
-    # skriptu nebo hned po úpravě by jinak šla ven stará pozice.
+    # matrix_world is recomputed after a location change only with the depsgraph;
+    # from a script or right after an edit the old position would go out.
     bpy.context.view_layer.update()
     originals = {
         entry["bb_id"]: entry
@@ -517,8 +517,8 @@ def export(scene: bpy.types.Scene) -> dict[str, int]:
 
 
 def filter_models(models: list[bpy.types.Object], text: str) -> list[bpy.types.Object]:
-    """Modely, jejichž jméno, cesta v Godotu nebo asset obsahuje [text]
-    (bez ohledu na velikost písmen; víc slov = všechna musí sedět)."""
+    """Models whose name, Godot path or asset contains [text]
+    (case-insensitive; several words = all must match)."""
     words = text.lower().split()
     if not words:
         return list(models)
@@ -530,7 +530,7 @@ def filter_models(models: list[bpy.types.Object], text: str) -> list[bpy.types.O
 
 
 def scene_models(scene: bpy.types.Scene) -> list[bpy.types.Object]:
-    """Modely, které jdou do Godotu, seřazené podle jména (pro panel i export)."""
+    """Models that go to Godot, sorted by name (for the panel and export)."""
     return sorted((obj for obj in scene.objects if P_ID in obj), key=lambda obj: obj.name)
 
 
@@ -539,11 +539,11 @@ def _entry_for(
     originals: dict[str, dict[str, Any]],
     taken: set[str],
 ) -> tuple[dict[str, Any] | None, bool]:
-    """Položka manifestu pro objekt.
+    """Manifest entry for an object.
 
-    Duplikací objektu v Blenderu se zkopírují i custom properties včetně id.
-    Kolize se proto řeší až tady, při exportu — dřív se o ní nedá spolehlivě
-    rozhodnout, která kopie je ta původní.
+    Duplicating an object in Blender also copies its custom properties, id included.
+    Collisions are therefore resolved here, at export; earlier there's no reliable
+    way to decide which copy is the original.
     """
     current = str(obj.get(P_ID, ""))
     source = originals.get(current)
@@ -570,11 +570,11 @@ def _xform_differs(left: list[float], right: list[float], epsilon: float = 1e-5)
     return any(abs(a - b) > epsilon for a, b in zip(left, right))
 
 
-# ------------------------------------------------------- přesun zdroje pravdy
+# --------------------------------------------------- moving the source of truth
 
 
 def expected_source(asset_src: str) -> str:
-    """Konvence: zdroj leží vedle assetu se stejným názvem."""
+    """Convention: the source sits next to the asset with the same name."""
     return os.path.splitext(asset_src.replace("res://", "", 1))[0] + ".blend"
 
 
@@ -582,8 +582,8 @@ def asset_abs(root: str, asset_src: str) -> str:
     return os.path.join(root, asset_src.replace("res://", "", 1))
 
 
-# Volby glTF exportu, které addon nastavuje a ukazuje v panelu. Výchozí
-# hodnoty platí pro nové zdroje; uživatel je mění v předvolbách addonu.
+# glTF export options the add-on sets and shows in the panel. The defaults
+# apply to new sources; the user changes them in the add-on preferences.
 EXPORT_DEFAULTS: dict[str, Any] = {
     "export_apply": True,
     "export_yup": True,
@@ -597,13 +597,13 @@ EXPORT_DEFAULTS: dict[str, Any] = {
     "export_draco_mesh_compression_enable": False,
 }
 
-# Kolekce, na kterou už výchozí nastavení exportu jednou použité bylo. Pak
-# platí to, co má zdroj uložené u sebe, a předvolby ho nepřepisují.
+# A collection the default export settings have already been applied to once.
+# After that, whatever the source has saved applies and preferences don't overwrite it.
 C_EXPORT_SET = "bb_export_set"
 
 
 def export_defaults() -> dict[str, Any]:
-    """Výchozí volby exportu z předvoleb addonu (bez nich vestavěné)."""
+    """Default export options from the add-on preferences (built-in ones without them)."""
     defaults = dict(EXPORT_DEFAULTS)
     addon = bpy.context.preferences.addons.get(__package__ or "")
     if addon is not None:
@@ -621,30 +621,30 @@ def gltf_exporter(collection: bpy.types.Collection) -> bpy.types.CollectionExpor
 
 
 def apply_export_settings(collection: bpy.types.Collection, settings: dict[str, Any]) -> None:
-    """Zapíše volby do exporteru kolekce; ty se uloží se zdrojovým .blend."""
+    """Writes the options into the collection's exporter; they're saved with the source .blend."""
     exporter = gltf_exporter(collection)
     if exporter is None:
         return
     props = exporter.export_properties
     for key, value in settings.items():
         if not hasattr(props, key):
-            continue   # jiná verze glTF addonu
+            continue   # different version of the glTF add-on
         try:
             setattr(props, key, value)
         except (TypeError, ValueError):
-            warn("export: volba %s=%r nejde nastavit" % (key, value))
+            warn("export: option %s=%r cannot be set" % (key, value))
     collection[C_EXPORT_SET] = True
 
 
 def ensure_exporter(collection: bpy.types.Collection, target: str) -> None:
-    """Collection Exporter na glTF do cesty assetu.
+    """Collection Exporter to glTF at the asset's path.
 
-    Cesta se nastavuje vždy znovu: ``bpy.data.libraries.write`` ji do nového
-    souboru neuloží a prázdná cesta by exportovala jinam (podle jména kolekce).
+    The path is always set again: ``bpy.data.libraries.write`` doesn't save it into
+    the new file, and an empty path would export elsewhere (by collection name).
 
-    Výchozí volby (hlavně aplikace modifikátorů) dostane kolekce jen jednou —
-    nový zdroj i starší zdroj, který je ještě nemá. Další změny v panelu
-    zůstanou ve zdroji.
+    The collection gets the default options (mainly applying modifiers) only once:
+    a new source, and an older source that doesn't have them yet. Further changes
+    in the panel stay in the source.
     """
     exporter = gltf_exporter(collection)
     if exporter is None:
@@ -661,35 +661,35 @@ def ensure_exporter(collection: bpy.types.Collection, target: str) -> None:
 
 
 def export_collection(collection: bpy.types.Collection) -> None:
-    """Vyexportuje kolekci jejím exporterem. ``wm.collection_export_all``
-    nestačí — exportuje jen kolekce, které jsou ve view layeru."""
+    """Exports the collection with its exporter. ``wm.collection_export_all``
+    isn't enough; it only exports collections that are in the view layer."""
     with bpy.context.temp_override(collection=collection):
         bpy.ops.collection.export_all()
 
 
 def promote_to_library(obj: bpy.types.Object, root: str) -> str:
-    """Z náhledu naimportovaného z .glb udělá samostatný zdrojový .blend.
+    """Turns a preview imported from .glb into its own source .blend.
 
-    Kolekce se zapíše do nového souboru vedle assetu i s nastaveným
-    exportem, lokální kopie se zruší a místo ní se soubor nalinkuje — od té
-    chvíle je zdrojem pravdy .blend.
+    The collection is written to a new file next to the asset with the export
+    already set up, the local copy is removed and the file is linked in its place.
+    From then on the .blend is the source of truth.
     """
     collection = obj.instance_collection
     if collection is None:
-        raise BridgeError("objekt nemá co uložit; chybí i .glb náhled")
+        raise BridgeError("the object has nothing to save; the .glb preview is missing too")
     if collection.library is not None:
-        raise BridgeError("asset už zdroj má")
+        raise BridgeError("the asset already has a source")
 
     asset_src = str(obj.get(P_SRC, ""))
     target = os.path.join(root, expected_source(asset_src))
     if os.path.exists(target):
-        raise BridgeError("%s už existuje; vyber ho v Godotu jako zdroj" % target)
+        raise BridgeError("%s already exists; pick it as the source in Godot" % target)
     os.makedirs(os.path.dirname(target), exist_ok=True)
     collection.pop(P_PREVIEW, None)
     ensure_exporter(collection, asset_abs(root, asset_src))
     bpy.data.libraries.write(target, {collection}, fake_user=True)
 
-    # Stejný asset může mít ve scéně víc instancí; všechny se přepojí.
+    # The same asset can have several instances in the scene; all are relinked.
     instances = [o for o in bpy.data.objects if o.instance_collection == collection]
     name = collection.name
     for child in list(collection.all_objects):
@@ -705,13 +705,13 @@ def promote_to_library(obj: bpy.types.Object, root: str) -> str:
     return target
 
 
-# ------------------------------------------------------------ úprava zdroje
+# ------------------------------------------------------------ source editing
 #
-# „Upravit zdroj“ otevře .blend jednoho assetu. Aby nechybělo okolí, postaví
-# se do něj z manifestu dočasná kolekce BB_Context s obálkami všeho ostatního
-# ze scény, posunutá tak, jako by asset stál na svém místě. Kontext se před
-# každým uložením odebere a po uložení vrátí — do zdrojového souboru se nikdy
-# nezapíše.
+# "Edit source" opens the .blend of one asset. So the surroundings aren't missing,
+# a temporary BB_Context collection with everything else from the scene is built
+# into it from the manifest, offset as if the asset stood at its place. The context
+# is removed before every save and restored after, so it's never written into the
+# source file.
 
 COLL_CONTEXT = "BB_Context"
 EDIT_MARKER = "bb_edit.json"
@@ -722,26 +722,26 @@ def _marker_path(root: str) -> str:
 
 
 def _pointer_path() -> str:
-    """Odkaz na rozpracovanou úpravu v uživatelské konfiguraci Blenderu.
+    """Pointer to the edit in progress, in Blender's user config.
 
-    Zdroj modelu může ležet mimo projekt (osobní zdroj), takže se značka
-    nedá najít procházením adresářů od otevřeného souboru.
+    The model's source can be outside the project (personal source), so the marker
+    can't be found by walking folders up from the open file.
     """
     return os.path.join(bpy.utils.user_resource("CONFIG", create=True), "blender_bridge_edit.json")
 
 
 def begin_edit(scene: bpy.types.Scene, obj: bpy.types.Object) -> str:
-    """Odešle rozpracované přesuny do Godotu a připraví úpravu zdroje.
+    """Sends pending changes to Godot and prepares source editing.
 
-    Vrátí cestu ke zdrojovému .blend, který se má otevřít.
+    Returns the path to the source .blend to open.
     """
     root = scene.get(S_ROOT, "")
     relative = obj.get(P_SRC_BLEND, "")
     if not root or not relative:
-        raise BridgeError("asset nemá zdrojový .blend")
-    source = os.path.join(root, relative)   # osobní zdroj je absolutní
+        raise BridgeError("the asset has no source .blend")
+    source = os.path.join(root, relative)   # a personal source is absolute
     if not os.path.isfile(source):
-        raise BridgeError("zdroj neexistuje: %s" % source)
+        raise BridgeError("source does not exist: %s" % source)
     manifest = stored_manifest_path(scene)
     export(scene)
     marker = _marker_path(root)
@@ -759,7 +759,7 @@ def begin_edit(scene: bpy.types.Scene, obj: bpy.types.Object) -> str:
 
 
 def edit_session() -> dict[str, Any] | None:
-    """Údaje o rozpracované úpravě, pokud je otevřený právě její zdroj."""
+    """Details of the edit in progress, if its source is the file currently open."""
     if not bpy.data.filepath or not os.path.isfile(_pointer_path()):
         return None
     try:
@@ -776,7 +776,7 @@ def edit_session() -> dict[str, Any] | None:
 
 
 def end_edit(session: dict[str, Any]) -> str:
-    """Ukončí úpravu; vrátí manifest, ze kterého se má scéna znovu postavit."""
+    """Ends the edit; returns the manifest to rebuild the scene from."""
     for path in (_marker_path(session["root"]), _pointer_path()):
         if os.path.isfile(path):
             os.remove(path)
@@ -784,12 +784,12 @@ def end_edit(session: dict[str, Any]) -> str:
 
 
 def build_context(session: dict[str, Any]) -> int:
-    """Postaví zamčené okolí kolem upravovaného modelu.
+    """Builds locked surroundings around the model being edited.
 
-    Godot část je skutečná geometrie z ``.context.glb``, ostatní modely
-    jsou instance jejich náhledů. Další výskyty téhož assetu ukazují přímo
-    na upravovanou kolekci, takže úpravy jsou vidět na všech místech naráz.
-    Všechno je posunuté do prostoru modelu, jako by stál na svém místě.
+    The Godot part is real geometry from ``.context.glb``, other models are
+    instances of their previews. Other occurrences of the same asset point directly
+    at the collection being edited, so edits show up everywhere at once.
+    Everything is moved into the model's space, as if it stood at its place.
     """
     clear_context()
     WARNINGS.clear()
@@ -825,8 +825,8 @@ def build_context(session: dict[str, Any]) -> int:
 
 
 def clear_context() -> None:
-    """Odebere kontext včetně všeho, co kvůli němu vzniklo (náhledy, meshe,
-    materiály). Volá se před každým uložením — do zdroje se nic nedostane."""
+    """Removes the context including everything created for it (previews, meshes,
+    materials). Called before every save, so nothing gets into the source."""
     context = bpy.data.collections.get(COLL_CONTEXT)
     if context is None:
         return
@@ -837,8 +837,8 @@ def clear_context() -> None:
         for obj in list(collection.all_objects):
             bpy.data.objects.remove(obj, do_unlink=True)
         bpy.data.collections.remove(collection)
-    # Data bez uživatelů by se stejně neuložila; purge je jen uklidí z paměti,
-    # aby se při dalším uložení nehromadila. Fake user se nemaže.
+    # Data without users wouldn't be saved anyway; purge just clears it from memory
+    # so it doesn't pile up on the next save. Fake users aren't deleted.
     bpy.data.orphans_purge(do_local_ids=True, do_linked_ids=True, do_recursive=True)
 
 
@@ -854,7 +854,7 @@ def collection_has_exporter(session: dict[str, Any]) -> bool:
 def setup_session_exporter(session: dict[str, Any]) -> str:
     collection = bpy.data.collections.get(session.get("collection", ""))
     if collection is None:
-        raise BridgeError("v souboru chybí kolekce %s" % session.get("collection"))
+        raise BridgeError("the file is missing collection %s" % session.get("collection"))
     target = asset_abs(session["root"], session["asset"])
     ensure_exporter(collection, target)
     return target
@@ -865,26 +865,26 @@ def setup_session_exporter(session: dict[str, Any]) -> str:
 
 def _source_label(obj: bpy.types.Object, tier: str, source: str) -> str:
     if tier != "library":
-        return "není — vyrobí se %s" % expected_source(str(obj.get(P_SRC, "")))
+        return "none, will be created at %s" % expected_source(str(obj.get(P_SRC, "")))
     if os.path.isabs(source):
-        return "%s (jen u tebe, mimo projekt)" % source
+        return "%s (only for you, outside the project)" % source
     return source
 
 
 def describe(obj: bpy.types.Object) -> tuple[str, list[tuple[str, str]]]:
-    """Co panel Detail ukáže o objektu: druh a řádky (popisek, hodnota).
+    """What the Detail panel shows about an object: kind and rows (label, value).
 
-    Druhy: ``model`` (posílá se do Godotu), ``godot`` (kontext z Godotu,
-    jen pro orientaci), ``helper`` (pomocný objekt, do Godotu se neposílá).
+    Kinds: ``model`` (sent to Godot), ``godot`` (context from Godot,
+    for reference only), ``helper`` (helper object, not sent to Godot).
     """
     if P_ID in obj:
         tier = obj.get(P_TIER, "none")
         source = obj.get(P_SRC_BLEND, "")
         rows = [
-            ("Node v Godotu", str(obj.get(P_PATH, ""))),
-            ("Rodič", str(obj.get(P_PARENT, "."))),
+            ("Godot node", str(obj.get(P_PATH, ""))),
+            ("Parent", str(obj.get(P_PARENT, "."))),
             ("Asset", str(obj.get(P_SRC, "")).replace("res://", "", 1)),
-            ("Zdroj", _source_label(obj, tier, source)),
+            ("Source", _source_label(obj, tier, source)),
             ("Id", str(obj.get(P_ID, ""))),
         ]
         return "model", rows
@@ -892,21 +892,21 @@ def describe(obj: bpy.types.Object) -> tuple[str, list[tuple[str, str]]]:
     while unit.parent is not None and unit.parent.parent is not None:
         unit = unit.parent
     if obj.get(P_PATH) == "context" or unit.get(P_PATH) == "context":
-        return "godot", [("Node v Godotu", unit.name)]
+        return "godot", [("Godot node", unit.name)]
     return "helper", []
 
 
 
-# --------------------------------------------------------- výběr zdroje
+# ---------------------------------------------------------- source choice
 
 
 def override_path(root: str, asset_src: str) -> str:
-    """``<asset>.bbsrc`` — přesná cesta ke zdroji, sdílená s Godotem."""
+    """``<asset>.bbsrc``: exact path to the source, shared with Godot."""
     return asset_abs(root, asset_src) + ".bbsrc"
 
 
-# Osobní výběr zdrojů mimo projekt. Stejný soubor čte Godot (BBPaths).
-# Adresář má .gitignore s „*“, takže se nikdy necommitne.
+# Personal choice of sources outside the project. Godot reads the same file (BBPaths).
+# The folder has a .gitignore with "*", so it's never committed.
 LOCAL_DIR = os.path.join(".pipeline", "local")
 LOCAL_SOURCES = os.path.join(LOCAL_DIR, "sources.json")
 
@@ -940,8 +940,8 @@ def _write_local(root: str, asset_src: str, path: str) -> None:
 
 
 def source_choice(root: str, asset_src: str) -> str:
-    """Jak je zdroj zvolený: ``personal`` (jen u tebe), ``shared`` (.bbsrc),
-    nebo prázdno (konvence: .blend vedle assetu)."""
+    """How the source is chosen: ``personal`` (only for you), ``shared`` (.bbsrc),
+    or empty (convention: .blend next to the asset)."""
     if asset_src in local_sources(root):
         return "personal"
     if os.path.isfile(override_path(root, asset_src)):
@@ -954,21 +954,21 @@ def _models_of(scene: bpy.types.Scene, asset_src: str) -> list[bpy.types.Object]
 
 
 def choose_source(scene: bpy.types.Scene, asset_src: str, blend_path: str) -> tuple[str, bool]:
-    """Nastaví existující .blend jako zdroj assetu a přepojí všechny jeho
-    instance. Vrací (cesta, osobní).
+    """Sets an existing .blend as the asset's source and relinks all its
+    instances. Returns (path, personal).
 
-    V projektu se uloží do sdíleného ``.bbsrc`` (relativně ke kořeni).
-    Mimo projekt se uloží jen u tebe — ostatní v týmu ho neuvidí.
+    Inside the project it's saved to the shared ``.bbsrc`` (relative to the root).
+    Outside the project it's saved only for you; others on the team won't see it.
     """
     root = scene.get(S_ROOT, "")
     if not root:
-        raise BridgeError("scéna nemá načtený manifest")
+        raise BridgeError("the scene has no manifest loaded")
     absolute = os.path.abspath(blend_path)
     if not os.path.isfile(absolute) or not absolute.lower().endswith(".blend"):
-        raise BridgeError("vyber existující .blend soubor")
+        raise BridgeError("pick an existing .blend file")
     try:
         relative = os.path.relpath(absolute, root)
-    except ValueError:   # Windows: jiný disk než projekt
+    except ValueError:   # Windows: a different drive than the project
         relative = absolute
     personal = relative.startswith("..") or os.path.isabs(relative)
 
@@ -996,8 +996,8 @@ def choose_source(scene: bpy.types.Scene, asset_src: str, blend_path: str) -> tu
 
 
 def clear_source(scene: bpy.types.Scene, asset_src: str) -> None:
-    """Zruší ručně vybraný zdroj — nejdřív osobní, pak sdílený. Platí zase
-    to, co zbylo: sdílený .bbsrc, .blend vedle assetu, jinak náhled z .glb."""
+    """Clears the hand-picked source, personal first, then shared. Whatever is
+    left applies again: the shared .bbsrc, the .blend next to the asset, otherwise the .glb preview."""
     root = scene.get(S_ROOT, "")
     if source_choice(root, asset_src) == "personal":
         _write_local(root, asset_src, "")

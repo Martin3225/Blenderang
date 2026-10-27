@@ -1,8 +1,8 @@
 extends SceneTree
 
-## Manifesty fixture scén pro Blender testy. Id jsou čitelná (id_crate, …),
-## aby je testy mohly dohledat. Blender harness si celý .pipeline zazálohuje
-## a před každým testem ho obnoví.
+## Manifests of the fixture scenes for the Blender tests. Ids are readable (id_crate, …)
+## so the tests can find them. The Blender harness backs up the whole .pipeline
+## and restores it before each test.
 
 const BBTest = preload("res://tests/bb_test.gd")
 
@@ -23,7 +23,7 @@ func _run() -> void:
 		helper.mark_props(root)
 		print("MANIFEST ", BBManifest.write(root))
 	helper._finish()
-	# Startovní Python přesně v podobě, v jaké ho plugin předá Blenderu.
+	# Startup Python exactly as the plugin passes it to Blender.
 	var file: FileAccess = FileAccess.open("res://.pipeline/startup_expr.py", FileAccess.WRITE)
 	file.store_string(BBLauncher.startup_expression(ProjectSettings.globalize_path("res://.pipeline/basic.json")))
 	file.close()

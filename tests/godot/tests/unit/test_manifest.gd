@@ -1,13 +1,13 @@
 extends "res://tests/bb_test.gd"
 
-## Co a v jakých souřadnicích jde z Godotu do manifestu.
+## What goes from Godot into the manifest, and in which coordinates.
 
 
 func test_owned_entry_has_world_transform() -> void:
 	var root: Node = scene("basic")
 	mark_props(root)
 	var crate: Dictionary = entry(BBManifest.export_scene(root), "Crate")
-	eq(crate.get("owner"), "blender", "vlastník")
+	eq(crate.get("owner"), "blender", "owner")
 	near(origin_of(crate), Vector3(2, 0, 3), "pozice Crate")
 	var x: Array = crate["xform"]
 	var expected: Basis = Basis(Vector3.UP, deg_to_rad(30))
@@ -19,7 +19,7 @@ func test_owned_entry_has_world_transform() -> void:
 func test_transform_composes_rotated_and_scaled_parent() -> void:
 	var root: Node = scene("basic")
 	mark_props(root)
-	# Rodič (10,2,0), otočený o 90° kolem Y, měřítko 2; dítě lokálně (1,0,0).
+	# Parent (10,2,0), rotated 90° around Y, scale 2; child locally (1,0,0).
 	near(origin_of(entry(BBManifest.export_scene(root), "InRotated")), Vector3(10, 2, -2), "pozice InRotated")
 	done()
 
@@ -28,7 +28,7 @@ func test_top_level_ignores_parent() -> void:
 	var root: Node = scene("basic")
 	mark_props(root)
 	near(origin_of(entry(BBManifest.export_scene(root), "Detached")), Vector3(20, 0, 20),
-		"top_level node nesmí dostat transformaci rodiče")
+		"a top_level node must not get the parent's transform")
 	done()
 
 
@@ -37,7 +37,7 @@ func test_plain_containers_are_transparent() -> void:
 	mark_props(root)
 	var manifest: Dictionary = BBManifest.export_scene(root)
 	for name: String in ["Props", "Rotated", "Logic"]:
-		check(entry(manifest, name).is_empty(), "%s je jen organizační kontejner" % name)
+		check(entry(manifest, name).is_empty(), "%s is just an organisational container" % name)
 	done()
 
 
@@ -46,9 +46,9 @@ func test_gameplay_nodes_become_locked_context() -> void:
 	mark_props(root)
 	var manifest: Dictionary = BBManifest.export_scene(root)
 	for name: String in ["Player", "Building", "Spawn", "Sun", "Sphere"]:
-		eq(entry(manifest, name).get("owner"), "godot", "%s jako kontext" % name)
-	check(entry(manifest, "Floating").is_empty(), "Floating je obyčejný Node3D, tedy kontejner")
-	check(entry(manifest, "Decoration").is_empty(), "neoznačená Decoration je součástí Building")
+		eq(entry(manifest, name).get("owner"), "godot", "%s as context" % name)
+	check(entry(manifest, "Floating").is_empty(), "Floating is a plain Node3D, so a container")
+	check(entry(manifest, "Decoration").is_empty(), "unmarked Decoration is part of Building")
 	done()
 
 
@@ -57,8 +57,8 @@ func test_owned_node_inside_context_is_found() -> void:
 	mark_props(root)
 	root.get_node("Building/Decoration").set_meta(BBOwnership.META_ID, "id_decoration")
 	var decoration: Dictionary = entry(BBManifest.export_scene(root), "Decoration")
-	eq(decoration.get("owner"), "blender", "ručně označená Decoration")
-	eq(decoration.get("parent"), "Building", "rodič")
+	eq(decoration.get("owner"), "blender", "manually marked Decoration")
+	eq(decoration.get("parent"), "Building", "parent")
 	near(origin_of(decoration), Vector3(-10, 3, -10), "pozice")
 	done()
 
@@ -68,11 +68,11 @@ func test_children_of_model_are_exported() -> void:
 	mark_props(root)
 	var manifest: Dictionary = BBManifest.export_scene(root)
 	var helmet: Dictionary = entry(manifest, "Helmet")
-	eq(helmet.get("owner"), "blender", "výstroj na modelu jde do Blenderu")
-	eq(helmet.get("parent"), "Character", "rodič je model")
-	near(origin_of(helmet), Vector3(5, 1.8, -2), "světová pozice dítěte")
+	eq(helmet.get("owner"), "blender", "gear on a model goes to Blender")
+	eq(helmet.get("parent"), "Character", "the parent is the model")
+	near(origin_of(helmet), Vector3(5, 1.8, -2), "the child's world position")
 	var socket: Dictionary = entry(manifest, "Socket")
-	eq(socket.get("owner"), "godot", "marker na modelu je kontext")
+	eq(socket.get("owner"), "godot", "a marker on a model is context")
 	near(origin_of(socket), Vector3(5, 1, -2), "pozice markeru")
 	done()
 
@@ -82,7 +82,7 @@ func test_inside_of_model_asset_is_not_exported() -> void:
 	mark_props(root)
 	var manifest: Dictionary = BBManifest.export_scene(root)
 	for item: Dictionary in manifest["nodes"]:
-		check(not str(item["path"]).begins_with("Props/Crate/"), "vnitřek crate.glb: %s" % item["path"])
+		check(not str(item["path"]).begins_with("Props/Crate/"), "inside of crate.glb: %s" % item["path"])
 	done()
 
 
@@ -90,11 +90,11 @@ func test_bounds_cover_whole_subtree() -> void:
 	var root: Node = scene("basic")
 	mark_props(root)
 	var building: Dictionary = entry(BBManifest.export_scene(root), "Building")
-	# Box 4×3×4 od y=0 a na něm krychle 1 m (y 3–4).
+	# A 4×3×4 box from y=0 with a 1 m cube on top (y 3–4).
 	near(Vector3(building["bounds"]["size"][0], building["bounds"]["size"][1], building["bounds"]["size"][2]),
-		Vector3(4, 4, 4), "velikost obálky")
+		Vector3(4, 4, 4), "bounding box size")
 	near(Vector3(building["bounds"]["position"][0], building["bounds"]["position"][1], building["bounds"]["position"][2]),
-		Vector3(-2, 0, -2), "počátek obálky")
+		Vector3(-2, 0, -2), "bounding box origin")
 	done()
 
 
@@ -103,7 +103,7 @@ func test_missing_source_reports_expected_path() -> void:
 	mark_props(root)
 	var crate: Dictionary = entry(BBManifest.export_scene(root), "Crate")
 	eq(crate.get("tier"), "none", "tier")
-	eq(crate.get("src_blend_missing"), "fixtures/assets/crate.blend", "očekávaný zdroj vedle assetu")
+	eq(crate.get("src_blend_missing"), "fixtures/assets/crate.blend", "expected source next to the asset")
 	done()
 
 
@@ -113,9 +113,9 @@ func test_write_creates_manifest_baseline_and_context() -> void:
 	mark_props(root)
 	var path: String = BBManifest.write(root)
 	eq(path, "res://.pipeline/basic.json", "cesta manifestu")
-	check(FileAccess.file_exists("res://.pipeline/basic.last.json"), "snímek pro diff")
+	check(FileAccess.file_exists("res://.pipeline/basic.last.json"), "snapshot for the diff")
 	check(FileAccess.file_exists("res://.pipeline/basic.context.glb"), "geometrie kontextu")
 	var manifest: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(path))
-	eq(manifest.get("context_glb"), ".pipeline/basic.context.glb", "odkaz na kontext v manifestu")
+	eq(manifest.get("context_glb"), ".pipeline/basic.context.glb", "context link in the manifest")
 	check(FileAccess.file_exists("res://.pipeline/.gdignore"), ".gdignore v .pipeline")
 	done()

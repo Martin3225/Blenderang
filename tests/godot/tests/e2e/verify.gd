@@ -1,7 +1,7 @@
 extends SceneTree
 
-## E2E krok 3 (Godot): načte změny z Blenderu, uloží scénu, načte ji znovu
-## z disku a porovná s otiskem z kroku 1.
+## E2E step 3 (Godot): loads the changes from Blender, saves the scene, loads it
+## again from disk and compares it with the fingerprint from step 1.
 
 const SCENE: String = "res://fixtures/scenes/basic.tscn"
 const E2E = preload("res://tests/e2e/snapshot.gd")
@@ -19,7 +19,7 @@ func _run() -> void:
 	var manifest: Dictionary = BBApply.read_json("res://.pipeline/basic.json")
 	var baseline: Dictionary = BBApply.read_json("res://.pipeline/basic.last.json")
 	var plan: BBApply.Plan = BBApply.plan(root, manifest, baseline)
-	_record("plán změn", plan.moved.size() == 4 and plan.added.size() == 1 and plan.removed.size() == 1 and plan.unresolved.is_empty(),
+	_record("change plan", plan.moved.size() == 4 and plan.added.size() == 1 and plan.removed.size() == 1 and plan.unresolved.is_empty(),
 		plan.summary())
 	BBApply.new().execute(BBApply.operations(root, plan))
 
@@ -30,23 +30,23 @@ func _run() -> void:
 	root.free()
 	root = _load()
 
-	_record("posun Crate je v uložené scéně", _origin(root, "Props/Crate").is_equal_approx(Vector3(5, 0, 3)),
+	_record("Crate's move is in the saved scene", _origin(root, "Props/Crate").is_equal_approx(Vector3(5, 0, 3)),
 		str(_origin(root, "Props/Crate")))
 	var rotated: Basis = BBManifest.global_xform(root.get_node("Rotated/InRotated"), root).basis
 	var expected: Basis = Basis(Vector3.UP, deg_to_rad(135)).scaled(Vector3(2, 2, 2))
-	_record("rotace pod otočeným a zvětšeným rodičem", _basis_near(rotated, expected), "%s vs %s" % [rotated, expected])
+	_record("rotation under a rotated and scaled parent", _basis_near(rotated, expected), "%s vs %s" % [rotated, expected])
 
 	var copy: Node3D = root.get_node_or_null("Props/TowerCopy")
-	_record("duplikát je nová instance pod Props", copy != null and copy.scene_file_path == "res://fixtures/assets/tower.glb",
+	_record("the duplicate is a new instance under Props", copy != null and copy.scene_file_path == "res://fixtures/assets/tower.glb",
 		"node: %s" % copy)
 	if copy != null:
-		_record("duplikát má vlastní id", BBOwnership.get_id(copy) != BBOwnership.get_id(root.get_node("Props/Tower")), "")
-		_record("duplikát stojí na místě z Blenderu", _origin(root, "Props/TowerCopy").is_equal_approx(Vector3(1, 0, 1)),
+		_record("the duplicate has its own id", BBOwnership.get_id(copy) != BBOwnership.get_id(root.get_node("Props/Tower")), "")
+		_record("the duplicate stands where Blender put it", _origin(root, "Props/TowerCopy").is_equal_approx(Vector3(1, 0, 1)),
 			str(_origin(root, "Props/TowerCopy")))
-	_record("výstroj se posunula s modelem a zůstala jeho dítětem",
+	_record("gear moved with the model and stayed its child",
 		_origin(root, "Character/Helmet").is_equal_approx(Vector3(7, 1.8, -2)), str(_origin(root, "Character/Helmet")))
-	_record("smazaný Barrel je pryč", root.get_node_or_null("Props/Barrel") == null, "")
-	_record("pomocný objekt z Blenderu se nepropsal", root.find_child("Pomocna", true, false) == null, "")
+	_record("deleted Barrel is gone", root.get_node_or_null("Props/Barrel") == null, "")
+	_record("a helper object from Blender didn't come through", root.find_child("Helper", true, false) == null, "")
 
 	var before: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(out.path_join("e2e_before.json")))
 	var after: Dictionary = E2E.snapshot(root)
@@ -57,9 +57,9 @@ func _run() -> void:
 			continue
 		if not after.has(path) or not E2E.same(before[path], after[path]):
 			changed.append(path)
-	_record("nic jiného se nezměnilo", changed.is_empty(), "změněno: %s" % [changed])
+	_record("nothing else changed", changed.is_empty(), "changed: %s" % [changed])
 
-	_record("opakované načtení je no-op",
+	_record("loading again is a no-op",
 		BBApply.plan(root, manifest, manifest).is_empty(), "")
 
 	var fresh: Dictionary = BBManifest.export_scene(root)
@@ -67,7 +67,7 @@ func _run() -> void:
 	for item: Dictionary in fresh["nodes"]:
 		if item.get("name") == "Crate":
 			crate = item
-	_record("Godot vidí zdroj vyrobený v Blenderu", crate.get("tier") == "library"
+	_record("Godot sees the source made in Blender", crate.get("tier") == "library"
 		and crate.get("src_blend") == "fixtures/assets/crate.blend", "tier=%s" % crate.get("tier"))
 
 	var file: FileAccess = FileAccess.open(out.path_join("e2e_verify.json"), FileAccess.WRITE)

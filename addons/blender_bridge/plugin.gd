@@ -1,19 +1,19 @@
 @tool
 extends EditorPlugin
 
-## Ovládání mostu Godot ↔ Blender.
+## Controls for the Godot ↔ Blender bridge.
 ##
-## Hlavní cesta má jeden klik na každé straně: [i]Otevřít v Blenderu[/i]
-## tady (tlačítko v liště 3D editoru, pravé tlačítko na tabu scény nebo na
-## [code].tscn[/code] ve FileSystemu), [i]Odeslat do Godotu[/i] v Blenderu.
-## Změny z Blenderu se do otevřené scény načtou samy.
+## The main path is one click on each side: [i]Open in Blender[/i]
+## here (button in the 3D editor toolbar, right-click on a scene tab or on
+## a [code].tscn[/code] in the FileSystem), [i]Send to Godot[/i] in Blender.
+## Changes from Blender are loaded into the open scene automatically.
 
 const MENU_NAME: String = "Blender Bridge"
-const PERSONAL_SOURCE_NOTICE: String = """%s leží mimo Godot projekt.
+const PERSONAL_SOURCE_NOTICE: String = """%s is outside the Godot project.
 
-Cesta se neuloží do projektu — platí jen u tebe. Ostatní v týmu tenhle zdroj neuvidí a model upravit nemůžou; uvidí dál jen .glb.
+The path is not saved in the project, it only applies to you. Others on the team won't see this source and can't edit the model; they will still see only the .glb.
 
-Aby zdroj měli všichni, dej .blend do projektu a vyber ho znovu."""
+To give everyone the source, put the .blend inside the project and pick it again."""
 const WATCH_INTERVAL: float = 1.0
 
 enum Action {
@@ -30,24 +30,24 @@ var _menu: PopupMenu
 var _toolbar_button: Button
 var _context_menus: Array[EditorContextMenuPlugin] = []
 var _watch: Timer
-## Poslední obsah manifestu, o kterém plugin ví (zapsal ho sám, nebo ho už
-## naimportoval). Jiný obsah na disku znamená změnu z Blenderu.
+## The last manifest content the plugin knows about (it wrote it itself, or
+## has already imported it). Different content on disk means a change from Blender.
 var _known_md5: Dictionary = {}
-## Značky nodů otevřených scén z okamžiku před reimportem, podle cesty scény.
+## Node marks of open scenes from just before a reimport, keyed by scene path.
 var _marks_before_reimport: Dictionary = {}
 
 
 func _enter_tree() -> void:
 	_menu = PopupMenu.new()
-	_menu.add_item("Otevřít scénu v Blenderu", Action.OPEN_IN_BLENDER)
-	_menu.add_separator("Pokročilé")
-	_menu.add_item("Označit výběr jako Blender-owned", Action.MARK_SELECTION)
-	_menu.add_item("Zrušit označení výběru", Action.UNMARK_SELECTION)
-	_menu.add_item("Označit všechny art instance ve scéně", Action.MARK_PROPS)
-	_menu.add_item("Vybrat zdrojový .blend pro výběr…", Action.PICK_SOURCE)
+	_menu.add_item("Open scene in Blender", Action.OPEN_IN_BLENDER)
+	_menu.add_separator("Advanced")
+	_menu.add_item("Mark selection as Blender-owned", Action.MARK_SELECTION)
+	_menu.add_item("Unmark selection", Action.UNMARK_SELECTION)
+	_menu.add_item("Mark all art instances in scene", Action.MARK_PROPS)
+	_menu.add_item("Pick source .blend for selection…", Action.PICK_SOURCE)
 	_menu.add_separator()
-	_menu.add_item("Jen exportovat manifest", Action.EXPORT_MANIFEST)
-	_menu.add_item("Ručně načíst změny z Blenderu", Action.IMPORT_MANIFEST)
+	_menu.add_item("Export manifest only", Action.EXPORT_MANIFEST)
+	_menu.add_item("Load changes from Blender manually", Action.IMPORT_MANIFEST)
 	_menu.id_pressed.connect(_on_action)
 	add_tool_submenu_item(MENU_NAME, _menu)
 
@@ -55,7 +55,7 @@ func _enter_tree() -> void:
 	_toolbar_button.text = "Blender"
 	_toolbar_button.icon = BBIcons.blender()
 	_toolbar_button.flat = true
-	_toolbar_button.tooltip_text = "Otevřít scénu v Blenderu"
+	_toolbar_button.tooltip_text = "Open scene in Blender"
 	_toolbar_button.pressed.connect(_on_toolbar_pressed)
 	add_control_to_container(CONTAINER_SPATIAL_EDITOR_MENU, _toolbar_button)
 
@@ -99,20 +99,20 @@ func _exit_tree() -> void:
 func _on_toolbar_pressed() -> void:
 	var root: Node = EditorInterface.get_edited_scene_root()
 	if root == null:
-		push_warning("Blender Bridge: není otevřená žádná scéna.")
+		push_warning("Blender Bridge: no scene is open.")
 		return
 	_open_in_blender(root)
 
 
-## Vstup z kontextových menu. Scénu, která není v editoru aktivní, nejdřív
-## otevře — manifest i značky bb_id se berou z otevřeného stromu.
+## Entry point from the context menus. A scene that isn't active in the
+## editor is opened first, since the manifest and bb_id marks come from the open tree.
 func open_scene_in_blender(path: String) -> void:
 	var root: Node = EditorInterface.get_edited_scene_root()
 	if root == null or root.scene_file_path != path:
 		EditorInterface.open_scene_from_path(path)
 		root = EditorInterface.get_edited_scene_root()
 	if root == null or root.scene_file_path != path:
-		push_error("Blender Bridge: scénu %s se nepodařilo otevřít." % path)
+		push_error("Blender Bridge: could not open scene %s." % path)
 		return
 	_open_in_blender(root)
 
@@ -120,7 +120,7 @@ func open_scene_in_blender(path: String) -> void:
 func _on_action(id: int) -> void:
 	var root: Node = EditorInterface.get_edited_scene_root()
 	if root == null:
-		push_warning("Blender Bridge: není otevřená žádná scéna.")
+		push_warning("Blender Bridge: no scene is open.")
 		return
 	match id:
 		Action.OPEN_IN_BLENDER:
@@ -139,47 +139,47 @@ func _on_action(id: int) -> void:
 			_import(root, false)
 
 
-## Celá cesta Godot → Blender jedním klikem. Při prvním použití na scéně
-## označí art instance sám, aby nebylo nutné nic připravovat.
+## The whole Godot → Blender path in one click. On first use in a scene it
+## marks the art instances by itself, so nothing needs preparing.
 func _open_in_blender(root: Node) -> void:
 	var duplicates: Array[Node] = []
 	if BBOwnership.collect_ids(root, duplicates).is_empty():
 		_mark(_find_props(root), root)
 	if root.scene_file_path.is_empty():
-		push_warning("Blender Bridge: scénu nejdřív ulož, manifest se pojmenuje podle ní.")
+		push_warning("Blender Bridge: save the scene first, the manifest is named after it.")
 		return
-	# Značky bb_id musí být na disku, jinak by je import nenašel.
+	# The bb_id marks must be on disk, otherwise the import wouldn't find them.
 	if EditorInterface.save_scene() != OK:
-		push_error("Blender Bridge: scénu se nepodařilo uložit.")
+		push_error("Blender Bridge: could not save the scene.")
 		return
 	var path: String = _export(root)
 	if path.is_empty():
 		return
 	if BBLauncher.launch(ProjectSettings.globalize_path(path)) == OK:
-		print("Blender Bridge: Blender se spouští se scénou %s." % root.scene_file_path.get_file())
+		print("Blender Bridge: launching Blender with scene %s." % root.scene_file_path.get_file())
 
 
-## Nastaví přesnou cestu ke zdrojovému .blend vybraného assetu. Zapisuje se
-## do souboru vedle assetu, takže platí pro všechny jeho instance i pro
-## celý tým.
+## Sets the exact path to the source .blend of the selected asset. It's
+## written to a file next to the asset, so it applies to all its instances
+## and to the whole team.
 func _pick_source() -> void:
 	var selected: Array[Node] = EditorInterface.get_selection().get_selected_nodes()
 	if selected.size() != 1 or selected[0].scene_file_path.is_empty():
-		push_warning("Blender Bridge: vyber právě jeden instancovaný node.")
+		push_warning("Blender Bridge: select exactly one instanced node.")
 		return
 	var asset: String = selected[0].scene_file_path
 	var dialog: EditorFileDialog = EditorFileDialog.new()
 	dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_FILE
-	# Celý disk: zdroj nemusí být v projektu, ne každý v týmu má zdrojáky.
+	# Whole disk: the source doesn't have to be in the project, not everyone on the team has the sources.
 	dialog.access = EditorFileDialog.ACCESS_FILESYSTEM
-	dialog.add_filter("*.blend", "Blender soubory")
-	dialog.title = "Zdrojový .blend pro %s" % asset.get_file()
+	dialog.add_filter("*.blend", "Blender files")
+	dialog.title = "Source .blend for %s" % asset.get_file()
 	dialog.current_path = ProjectSettings.globalize_path("res://" + BBPaths.expected_source_for(asset))
 	dialog.file_selected.connect(func(path: String) -> void:
 		dialog.queue_free()
 		var personal: bool = BBPaths.choose_source(asset, path)
 		EditorInterface.get_resource_filesystem().scan()
-		print("Blender Bridge: %s → %s%s" % [asset.get_file(), path, " (jen u tebe)" if personal else ""])
+		print("Blender Bridge: %s → %s%s" % [asset.get_file(), path, " (only for you)" if personal else ""])
 		if personal:
 			_warn_personal_source(path)
 	)
@@ -190,7 +190,7 @@ func _pick_source() -> void:
 
 func _warn_personal_source(path: String) -> void:
 	var notice: AcceptDialog = AcceptDialog.new()
-	notice.title = "Zdroj mimo projekt"
+	notice.title = "Source outside the project"
 	notice.dialog_text = PERSONAL_SOURCE_NOTICE % path
 	notice.confirmed.connect(notice.queue_free)
 	notice.canceled.connect(notice.queue_free)
@@ -202,7 +202,7 @@ func _mark(nodes: Array[Node], root: Node) -> void:
 	var duplicates: Array[Node] = []
 	var taken: Dictionary = BBOwnership.collect_ids(root, duplicates)
 	var undo: EditorUndoRedoManager = get_undo_redo()
-	undo.create_action("Blender Bridge: označit nody")
+	undo.create_action("Blender Bridge: mark nodes")
 	var marked: int = 0
 	for node: Node in nodes + duplicates:
 		if not node is Node3D:
@@ -217,12 +217,12 @@ func _mark(nodes: Array[Node], root: Node) -> void:
 		undo.add_do_method(node, &"set_meta", BBOwnership.META_ID, id)
 		undo.add_undo_method(node, &"remove_meta", BBOwnership.META_ID)
 	undo.commit_action()
-	print("Blender Bridge: označeno %d nodů." % marked)
+	print("Blender Bridge: marked %d nodes." % marked)
 
 
 func _unmark(nodes: Array[Node]) -> void:
 	var undo: EditorUndoRedoManager = get_undo_redo()
-	undo.create_action("Blender Bridge: zrušit označení")
+	undo.create_action("Blender Bridge: unmark nodes")
 	for node: Node in nodes:
 		if not BBOwnership.is_blender_owned(node):
 			continue
@@ -249,15 +249,15 @@ func _export(root: Node) -> String:
 	if path.is_empty():
 		return ""
 	_known_md5[path] = FileAccess.get_md5(path)
-	print("Blender Bridge: manifest zapsán do %s" % path)
+	print("Blender Bridge: manifest written to %s" % path)
 	return path
 
 
-## Uložení zdroje v Blenderu přegeneruje .glb a Godot ho reimportuje. Instance
-## v otevřených scénách přitom nahradí novými nody bez metadat — model by
-## přestal být v Blenderu upravitelný a nadřazený node (NavigationRegion3D)
-## by spolkl i terén. Značky se proto před reimportem zapamatují a po něm
-## vrátí.
+## Saving a source in Blender regenerates the .glb and Godot reimports it.
+## In open scenes Godot replaces its instances with new nodes without metadata,
+## so the model would stop being editable in Blender and the parent node
+## (NavigationRegion3D) would swallow the terrain too. The marks are
+## therefore remembered before the reimport and restored after it.
 func _on_reimporting(_resources: PackedStringArray) -> void:
 	_marks_before_reimport.clear()
 	for root: Node in EditorInterface.get_open_scene_roots():
@@ -266,7 +266,7 @@ func _on_reimporting(_resources: PackedStringArray) -> void:
 
 
 func _on_reimported(_resources: PackedStringArray) -> void:
-	# Editor scény znovu sestaví až po tomhle signálu.
+	# The editor rebuilds the scenes only after this signal.
 	_restore_marks.call_deferred()
 
 
@@ -275,13 +275,13 @@ func _restore_marks() -> void:
 		var marks: Dictionary = _marks_before_reimport.get(root.scene_file_path, {})
 		var restored: int = BBOwnership.restore_marks(root, marks)
 		if restored > 0:
-			print("Blender Bridge: po reimportu vráceno označení %d nodů ve scéně %s." % [restored, root.scene_file_path.get_file()])
+			print("Blender Bridge: restored marks on %d nodes in scene %s after reimport." % [restored, root.scene_file_path.get_file()])
 	_marks_before_reimport.clear()
 
 
-## Změny z Blenderu se načtou samy: Blender po „Odeslat do Godotu“ přepíše
-## manifest, tady se to pozná podle změny obsahu. Kontroluje se jen manifest
-## právě otevřené scény.
+## Changes from Blender load automatically: after "Send to Godot" Blender
+## rewrites the manifest, which is detected here by a change in content.
+## Only the manifest of the currently open scene is checked.
 func _poll_manifest() -> void:
 	var root: Node = EditorInterface.get_edited_scene_root()
 	if root == null or root.scene_file_path.is_empty():
@@ -291,8 +291,8 @@ func _poll_manifest() -> void:
 		return
 	var md5: String = FileAccess.get_md5(path)
 	if not _known_md5.has(path):
-		# Manifest z dřívějška, o kterém tahle relace editoru neví — nenačítat
-		# naslepo, jen si ho zapamatovat.
+		# A manifest from earlier that this editor session doesn't know about.
+		# Don't load it blindly, just remember it.
 		_known_md5[path] = md5
 		return
 	if _known_md5[path] == md5:
@@ -305,19 +305,19 @@ func _import(root: Node, automatic: bool) -> void:
 	var path: String = BBManifest.manifest_path(root)
 	var manifest: Dictionary = BBApply.read_json(path)
 	if manifest.is_empty():
-		push_warning("Blender Bridge: manifest chybí, nejdřív otevři scénu v Blenderu.")
+		push_warning("Blender Bridge: manifest is missing, open the scene in Blender first.")
 		return
 	var baseline: Dictionary = BBApply.read_json(BBManifest.baseline_path(root))
 	var plan: BBApply.Plan = BBApply.plan(root, manifest, baseline)
 	if plan.is_empty():
 		if not automatic:
-			print("Blender Bridge: žádné změny.")
+			print("Blender Bridge: no changes.")
 		return
 	BBApply.commit(root, BBApply.operations(root, plan), get_undo_redo())
 	BBManifest.store(BBManifest.baseline_path(root), JSON.stringify(manifest, "\t"))
 	_known_md5[path] = FileAccess.get_md5(path)
-	print("Blender Bridge: z Blenderu %s (Ctrl+Z vrátí)" % plan.summary())
+	print("Blender Bridge: from Blender %s (Ctrl+Z to undo)" % plan.summary())
 	for problem: String in plan.unresolved:
 		push_warning("Blender Bridge: %s" % problem)
 	for name: String in plan.pinned:
-		push_warning("Blender Bridge: %s je zamčený v Godotu, změna z Blenderu ignorována." % name)
+		push_warning("Blender Bridge: %s is pinned in Godot, change from Blender ignored." % name)

@@ -1,7 +1,7 @@
 extends RefCounted
 
-## Otisk scény: pro každý node cesta, třída, zdroj instance a světová
-## transformace. Slouží k ověření, že import změnil jen to, co měl.
+## Scene fingerprint: for each node its path, class, instance source and world
+## transform. Used to verify the import changed only what it should.
 
 
 static func snapshot(root: Node) -> Dictionary:

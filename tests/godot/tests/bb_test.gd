@@ -1,8 +1,8 @@
 extends RefCounted
 
-## Základ testovacích sad. Test je metoda [code]test_*[/code], která na konci
-## zavolá [method done]. Runtime chyba v GDScriptu funkci tiše ukončí; bez
-## [method done] by spadlý test vypadal jako úspěšný.
+## Base of the test suites. A test is a [code]test_*[/code] method that calls
+## [method done] at the end. A GDScript runtime error silently ends the function;
+## without [method done] a crashed test would look like a pass.
 
 const SCENES: String = "res://fixtures/scenes/"
 const PIPELINE: String = "res://.pipeline"
@@ -30,12 +30,12 @@ func check(condition: bool, message: String) -> void:
 
 func eq(actual: Variant, expected: Variant, message: String) -> void:
 	if typeof(actual) != typeof(expected) or actual != expected:
-		_failures.append("%s: dostal %s, čekal %s" % [message, actual, expected])
+		_failures.append("%s: got %s, expected %s" % [message, actual, expected])
 
 
 func near(actual: Variant, expected: Variant, message: String, epsilon: float = 0.001) -> void:
 	if not _near(actual, expected, epsilon):
-		_failures.append("%s: dostal %s, čekal %s" % [message, actual, expected])
+		_failures.append("%s: got %s, expected %s" % [message, actual, expected])
 
 
 func _near(a: Variant, b: Variant, epsilon: float) -> bool:
@@ -51,7 +51,7 @@ func _near(a: Variant, b: Variant, epsilon: float) -> bool:
 	return a == b
 
 
-## Instance testovací scény přidaná do stromu (Terrain3D bez stromu nepeče).
+## Instance of a test scene added to the tree (Terrain3D doesn't bake without a tree).
 func scene(name: String) -> Node:
 	var path: String = SCENES + name + ".tscn"
 	var root: Node = (load(path) as PackedScene).instantiate(PackedScene.GEN_EDIT_STATE_INSTANCE)
@@ -61,8 +61,8 @@ func scene(name: String) -> Node:
 	return root
 
 
-## Označí art instance jako editor při prvním „Otevřít v Blenderu“, jen
-## s čitelnými id, aby šly v testech dohledat.
+## Marks art instances like the editor does on the first "Open in Blender", only
+## with readable ids so tests can find them.
 func mark_props(root: Node) -> Array[Node]:
 	var marked: Array[Node] = []
 	var stack: Array[Node] = [root]
@@ -107,7 +107,7 @@ func remove_file(path: String) -> void:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
 
-# Volá runner.
+# Called by the runner.
 
 func _begin() -> void:
 	_failures = []
@@ -124,7 +124,7 @@ func _finish() -> Dictionary:
 	if _skip != "":
 		return {"status": "skip", "message": _skip}
 	if not _done:
-		_failures.append("test nedoběhl (runtime chyba, viz log)")
+		_failures.append("test did not finish (runtime error, see log)")
 	if _failures.is_empty():
 		return {"status": "pass"}
 	return {"status": "fail", "message": "; ".join(_failures)}

@@ -1,8 +1,8 @@
 extends SceneTree
 
-## E2E krok 1 (Godot): scéna se označí jako při kliknutí na tlačítko, uloží,
-## vyexportuje se manifest a startovní Python pro Blender. Stav všech nodů
-## se zapíše, aby šlo na konci ověřit, že se nic dalšího nezměnilo.
+## E2E step 1 (Godot): the scene is marked as when clicking the button, saved,
+## and the manifest and startup Python for Blender are exported. The state of all
+## nodes is recorded so the end can verify nothing else changed.
 
 const SCENE: String = "res://fixtures/scenes/basic.tscn"
 
@@ -25,13 +25,13 @@ func _run() -> void:
 		if BBOwnership.is_auto_markable(node, root):
 			BBOwnership.assign_id(node, taken)
 			taken[BBOwnership.get_id(node)] = node
-	_record("označeno 7 modelů", taken.size() == 7, str(taken.size()))
+	_record("7 models marked", taken.size() == 7, str(taken.size()))
 
 	var packed: PackedScene = PackedScene.new()
 	packed.pack(root)
-	_record("scéna uložena", ResourceSaver.save(packed, SCENE) == OK, "")
+	_record("scene saved", ResourceSaver.save(packed, SCENE) == OK, "")
 	var manifest: String = BBManifest.write(root)
-	_record("manifest zapsán", manifest == "res://.pipeline/basic.json", manifest)
+	_record("manifest written", manifest == "res://.pipeline/basic.json", manifest)
 
 	_write(out.path_join("startup_expr.py"),
 		BBLauncher.startup_expression(ProjectSettings.globalize_path(manifest)))

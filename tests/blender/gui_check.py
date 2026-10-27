@@ -1,10 +1,10 @@
-"""GUI testy Blenderu (s oknem, na virtuálním displeji).
+"""Blender GUI tests (with a window, on a virtual display).
 
-Pokrývá, co na pozadí nejde: start přes časovač ze startovního Pythonu
-z Godotu, vykreslení panelu v obou režimech, zaměření pohledu po otevření
-a přechody mezi scénou a úpravou modelu se skutečným oknem.
+Covers what can't be done in the background: starting via a timer from Godot's
+startup Python, drawing the panel in both modes, framing the view after opening
+and switching between the scene and model editing with a real window.
 
-    blender --factory-startup --python-expr "<startovní Python z Godotu>" \
+    blender --factory-startup --python-expr "<startup Python from Godot>" \
         --python tests/blender/gui_check.py -- --repo R --project P --out O
 """
 
@@ -25,7 +25,7 @@ import blender_bridge.bridge as bridge  # noqa: E402
 
 OUT = options["--out"]
 results = []
-drawn = []          # (režim, chyba nebo None) z každého vykreslení panelu
+drawn = []          # (mode, error or None) from each panel draw
 
 
 def record(name, passed, message=""):
@@ -34,8 +34,8 @@ def record(name, passed, message=""):
 
 
 class BB_PT_probe(blender_bridge.BB_PT_panel):
-    """Stejný panel v záložce Item (ta je v sidebaru vidět výchozí), aby se
-    vykreslil bez klikání na záložku Bridge. Zaznamená výjimky z draw()."""
+    """The same panel in the Item tab (visible in the sidebar by default), so it
+    draws without clicking the Bridge tab. Records exceptions from draw()."""
 
     bl_idname = "BB_PT_probe"
     bl_category = "Item"
@@ -50,7 +50,7 @@ class BB_PT_probe(blender_bridge.BB_PT_panel):
 
 
 class BB_PT_probe_detail(blender_bridge.BB_PT_detail):
-    """Panel Detail v záložce Item, se zaznamenáním výjimek."""
+    """Detail panel in the Item tab, recording exceptions."""
 
     bl_idname = "BB_PT_probe_detail"
     bl_category = "Item"
@@ -89,71 +89,71 @@ def panel_drew(mode: str) -> tuple[bool, str]:
     redraw()
     runs = [error for kind, error in drawn if kind == mode]
     errors = [e for e in runs if e]
-    return bool(runs) and not errors, (errors[0] if errors else "panel se nevykreslil")
+    return bool(runs) and not errors, (errors[0] if errors else "panel did not draw")
 
 
-# Kroky běží přes časovače: mezi nimi musí Blender vykreslit okno a načíst
-# soubory. Každý vrací pauzu před dalším krokem.
+# Steps run through timers: between them Blender must draw the window and load
+# files. Each returns the pause before the next step.
 
 def step_scene_opened():
     scene = bpy.context.scene
-    record("startovní Python z Godotu postaví scénu v okně",
+    record("Godot's startup Python builds the scene in the window",
            scene.get(bridge.S_MANIFEST, "").endswith("basic.json") and scene.name == "basic", scene.name)
     ok, message = panel_drew("scene")
-    record("panel scény se vykreslí bez chyby", ok, message)
+    record("scene panel draws without errors", ok, message)
     scene.bb_model_filter = "rotated"
     drawn.clear()
     ok, message = panel_drew("scene")
-    record("panel s hledáním se vykreslí", ok, message)
-    scene.bb_model_filter = "nic takoveho"
+    record("panel with search draws", ok, message)
+    scene.bb_model_filter = "nothing like this"
     drawn.clear()
     ok, message = panel_drew("scene")
-    record("panel bez výsledků hledání se vykreslí", ok, message)
+    record("panel with no search results draws", ok, message)
     scene.bb_model_filter = ""
     for name in ("Crate", "Building"):
         bpy.context.view_layer.objects.active = bpy.data.objects[name]
         drawn.clear()
         ok, message = panel_drew("detail")
-        record("detail pro %s se vykreslí" % name, ok, message)
+        record("detail for %s draws" % name, ok, message)
 
     window, area = view3d()
     space = area.spaces.active
-    record("pohled dohlédne na terén (clip_end)", space.clip_end >= 20000, str(space.clip_end))
+    record("view reaches the terrain (clip_end)", space.clip_end >= 20000, str(space.clip_end))
     models = [o.matrix_world.translation for o in bridge.scene_models(scene)]
     center = sum(models, models[0] * 0) / len(models)
     distance = (space.region_3d.view_location - center).length
-    record("pohled je zaměřený na modely", distance < 10, "střed pohledu %.1f m od modelů" % distance)
+    record("view is framed on the models", distance < 10, "view centre %.1f m from the models" % distance)
     return 0.5
 
 
 def step_promote_and_edit():
     window, area = view3d()
     with bpy.context.temp_override(window=window, area=area):
-        record("vyrobit zdroj z tlačítka v seznamu", bpy.ops.bb.promote_source(name="Tower") == {"FINISHED"})
-        record("upravit model z tlačítka v seznamu", bpy.ops.bb.edit_source(name="Tower") == {"FINISHED"})
+        record("make source from the list button", bpy.ops.bb.promote_source(name="Tower") == {"FINISHED"})
+        record("edit model from the list button", bpy.ops.bb.edit_source(name="Tower") == {"FINISHED"})
     return 1.0
 
 
 def step_in_edit():
-    record("otevřel se zdroj modelu", bpy.data.filepath.endswith("tower.blend"), bpy.data.filepath)
-    record("kolem modelu je kontext", bpy.data.collections.get(bridge.COLL_CONTEXT) is not None)
+    record("the model's source opened", bpy.data.filepath.endswith("tower.blend"), bpy.data.filepath)
+    record("context surrounds the model", bpy.data.collections.get(bridge.COLL_CONTEXT) is not None)
     ok, message = panel_drew("edit")
-    record("panel úpravy se vykreslí bez chyby", ok, message)
+    record("edit panel draws without errors", ok, message)
     bpy.ops.wm.save_mainfile()
     window, area = view3d()
     with bpy.context.temp_override(window=window, area=area):
-        record("uložit a zpět do scény", bpy.ops.bb.return_to_scene() == {"FINISHED"})
+        record("save and return to scene", bpy.ops.bb.return_to_scene() == {"FINISHED"})
     return 1.0
 
 
 def step_back_in_scene():
-    record("po návratu je scéna bez souboru", bpy.data.filepath == "")
-    record("Tower má zdroj", bpy.data.objects["Tower"].get(bridge.P_TIER) == "library")
+    record("after returning the scene has no file", bpy.data.filepath == "")
+    record("Tower has a source", bpy.data.objects["Tower"].get(bridge.P_TIER) == "library")
     drawn.clear()
     ok, message = panel_drew("scene")
-    record("panel scény po návratu", ok, message)
+    record("scene panel after returning", ok, message)
 
-    # Zdroj mimo projekt: upozornění v okně a výstraha v panelu Detail.
+    # Source outside the project: notice in the window and warning in the Detail panel.
     outside = os.path.join(os.path.dirname(options["--project"]), "outside_sources", "gui_crate.blend")
     os.makedirs(os.path.dirname(outside), exist_ok=True)
     collection = bpy.data.collections.new("crate_master")
@@ -162,13 +162,13 @@ def step_back_in_scene():
     window, area = view3d()
     with bpy.context.temp_override(window=window, area=area):
         result = bpy.ops.bb.choose_source(name="Crate", filepath=outside)
-    record("vybrat zdroj mimo projekt z okna", result == {"FINISHED"})
-    record("zdroj mimo projekt je osobní",
+    record("pick a source outside the project from the window", result == {"FINISHED"})
+    record("a source outside the project is personal",
            bridge.source_choice(options["--project"], "res://fixtures/assets/crate.glb") == "personal")
     bpy.context.view_layer.objects.active = bpy.data.objects["Crate"]
     drawn.clear()
     ok, message = panel_drew("detail")
-    record("detail s osobním zdrojem se vykreslí", ok, message)
+    record("detail with a personal source draws", ok, message)
     return None
 
 
@@ -184,7 +184,7 @@ def run_steps():
             return finish()
         return delay or 0.5
     except Exception:  # noqa: BLE001
-        record("(výjimka)", False, traceback.format_exc(limit=3))
+        record("(exception)", False, traceback.format_exc(limit=3))
         return finish()
 
 
@@ -195,5 +195,5 @@ def finish():
     return None
 
 
-# Startovní Python z Godotu volá open_from_godot po 0,2 s; počká se déle.
+# Godot's startup Python calls open_from_godot after 0.2 s; wait longer.
 bpy.app.timers.register(run_steps, first_interval=3.0, persistent=True)

@@ -1,10 +1,10 @@
 @tool
 extends EditorContextMenuPlugin
 
-## Položka „Otevřít v Blenderu“ v kontextovém menu tabu scény a souboru
-## [code].tscn[/code] ve FileSystemu.
+## "Open in Blender" item in the context menu of a scene tab and of a
+## [code].tscn[/code] file in the FileSystem.
 
-const LABEL: String = "Otevřít v Blenderu"
+const LABEL: String = "Open in Blender"
 
 var _open_scene: Callable
 
@@ -27,7 +27,7 @@ func _on_pressed(selection: Variant) -> void:
 			return
 
 
-## Sloty předávají výběr různě: FileSystem pole cest, tab scény přímo node.
+## Slots pass the selection differently: FileSystem an array of paths, scene tab the node itself.
 func _paths_of(selection: Variant) -> PackedStringArray:
 	if selection is PackedStringArray:
 		return selection

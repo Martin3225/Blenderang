@@ -1,4 +1,4 @@
-"""Úprava modelu v jeho .blend s kontextem ze scény."""
+"""Editing a model in its .blend with context from the scene."""
 
 import json
 import os
@@ -31,7 +31,7 @@ class EditTest(BridgeCase):
         self.assertTrue(bridge._same_file(bpy.data.filepath, os.path.join(harness.ASSETS, "tower.blend")))
         session = bridge.edit_session()
         self.assertIsNotNone(session)
-        self.assertIn("tower", bpy.context.scene.collection.children, "model je ve scéně zdroje")
+        self.assertIn("tower", bpy.context.scene.collection.children, "the model is in the source's scene")
 
     def test_context_surrounds_model_in_its_local_space(self):
         self.start_edit()
@@ -40,11 +40,11 @@ class EditTest(BridgeCase):
         names = {o.name for o in context.all_objects}
         for name in ("Building", "Player", "Crate", "Barrel"):
             self.assertIn(name, names)
-        # Tower stojí v Godotu na (-4, 0, 1), Building na (-10, 0, -10).
+        # In Godot, Tower stands at (-4, 0, 1), Building at (-10, 0, -10).
         offset = godot_to_blender_point(-10, 0, -10) - godot_to_blender_point(-4, 0, 1)
         self.assertVectorAlmostEqual(bpy.data.objects["Building"].matrix_world.translation, offset)
         building = bpy.data.objects["Building"]
-        self.assertTrue(any(c.type == "MESH" for c in building.children_recursive), "kontext má skutečnou geometrii")
+        self.assertTrue(any(c.type == "MESH" for c in building.children_recursive), "context has real geometry")
 
     def test_context_is_locked(self):
         self.start_edit()
@@ -63,8 +63,8 @@ class EditTest(BridgeCase):
         before = os.stat(glb).st_mtime_ns
         time.sleep(0.05)
         bpy.ops.wm.save_mainfile()
-        self.assertGreater(os.stat(glb).st_mtime_ns, before, ".glb se nepřegeneroval")
-        self.assertIsNotNone(bpy.data.collections.get(bridge.COLL_CONTEXT), "kontext se po uložení vrátil")
+        self.assertGreater(os.stat(glb).st_mtime_ns, before, ".glb was not regenerated")
+        self.assertIsNotNone(bpy.data.collections.get(bridge.COLL_CONTEXT), "context came back after saving")
 
         copy = os.path.join(harness.PIPELINE, "saved_copy.blend")
         shutil.copyfile(bpy.data.filepath, copy)
@@ -77,7 +77,7 @@ class EditTest(BridgeCase):
             os.remove(copy)
         self.assertNotIn(bridge.COLL_CONTEXT, collections)
         self.assertFalse({"Building", "Player", "Godot", "Crate"} & objects, objects)
-        self.assertFalse({m for m in meshes if "crate" in m.lower()}, "náhledy jiných modelů se uložily")
+        self.assertFalse({m for m in meshes if "crate" in m.lower()}, "previews of other models were saved")
 
     def test_return_to_scene(self):
         self.start_edit()
@@ -86,13 +86,13 @@ class EditTest(BridgeCase):
         self.assertIsNone(bridge.edit_session())
         self.assertFalse(os.path.exists(os.path.join(harness.PIPELINE, "bb_edit.json")))
         tower = bpy.data.objects["Tower"]
-        self.assertEqual(tower.get(bridge.P_TIER), "library", "scéna po návratu vidí nový zdroj")
+        self.assertEqual(tower.get(bridge.P_TIER), "library", "after returning the scene sees the new source")
 
     def test_edit_requires_source(self):
         self.open_scene()
-        with self.assertRaisesRegex(RuntimeError, "nemá zdrojový"):
+        with self.assertRaisesRegex(RuntimeError, "has no source"):
             bpy.ops.bb.edit_source(name="Tower")
-        self.assertEqual(bpy.data.filepath, "", "scéna zůstala otevřená")
+        self.assertEqual(bpy.data.filepath, "", "the scene stayed open")
 
     def test_exporter_points_to_asset(self):
         self.start_edit()
@@ -121,7 +121,7 @@ class EditTest(BridgeCase):
         plain = glb_vertex_count(glb)
         props.export_apply = True
         bpy.ops.wm.save_mainfile()
-        self.assertGreater(glb_vertex_count(glb), plain, "pole z modifikátoru chybí v .glb")
+        self.assertGreater(glb_vertex_count(glb), plain, "the array from the modifier is missing in the .glb")
 
     def test_older_source_gets_defaults_once(self):
         self.start_edit()
@@ -132,13 +132,13 @@ class EditTest(BridgeCase):
         bpy.ops.wm.open_mainfile(filepath=bpy.data.filepath)
         collection = bpy.data.collections["tower"]
         self.assertTrue(bridge.gltf_exporter(collection).export_properties.export_apply,
-                        "starší zdroj bez nastavení dostal výchozí")
+                        "an older source without settings got the defaults")
 
         bridge.gltf_exporter(collection).export_properties.export_apply = False
         bpy.ops.wm.save_mainfile()
         bpy.ops.wm.open_mainfile(filepath=bpy.data.filepath)
         self.assertFalse(bridge.gltf_exporter(bpy.data.collections["tower"]).export_properties.export_apply,
-                         "vlastní nastavení zdroje se nepřepíše")
+                         "a source's own settings are not overwritten")
 
 
 def glb_vertex_count(path: str) -> int:
@@ -153,7 +153,7 @@ def glb_vertex_count(path: str) -> int:
 
 
 class PersonalSourceEditTest(BridgeCase):
-    """Úprava modelu, jehož zdroj leží mimo projekt."""
+    """Editing a model whose source is outside the project."""
 
     def test_edit_personal_source(self):
         from test_build import write_source
@@ -165,17 +165,17 @@ class PersonalSourceEditTest(BridgeCase):
         bridge.choose_source(scene, "res://fixtures/assets/tower.glb", outside)
 
         self.assertTrue(bridge._pointer_path().startswith(os.path.dirname(harness.PROJECT)),
-                        "odkaz na úpravu je v izolované konfiguraci testů, ne u uživatele")
+                        "the edit pointer is in the tests' isolated config, not the user's")
         self.assertEqual(bpy.ops.bb.edit_source(name="Tower"), {"FINISHED"})
         self.assertTrue(bridge._same_file(bpy.data.filepath, outside))
-        self.assertIsNotNone(bridge.edit_session(), "úprava se najde i mimo projekt")
+        self.assertIsNotNone(bridge.edit_session(), "the edit is found outside the project too")
         self.assertIsNotNone(bpy.data.collections.get(bridge.COLL_CONTEXT))
 
         glb = os.path.join(harness.ASSETS, "tower.glb")
         before = os.stat(glb).st_mtime_ns
         time.sleep(0.05)
         bpy.ops.wm.save_mainfile()
-        self.assertGreater(os.stat(glb).st_mtime_ns, before, "uložení přegeneruje .glb v projektu")
+        self.assertGreater(os.stat(glb).st_mtime_ns, before, "saving regenerates the .glb in the project")
 
         self.assertEqual(bpy.ops.bb.return_to_scene(), {"FINISHED"})
         self.assertIsNone(bridge.edit_session())

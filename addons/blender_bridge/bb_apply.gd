@@ -2,11 +2,11 @@
 class_name BBApply
 extends RefCounted
 
-## Zápis manifestu upraveného v Blenderu zpět do Godot scény.
+## Writes a manifest edited in Blender back into the Godot scene.
 ##
-## Mění se jen transformace nodů s [code]bb_id[/code], přidávají se nové
-## instance a mažou ty, které v Blenderu zmizely. Gameplay nody, Terrain3D
-## ani cokoli bez [code]bb_id[/code] se nedotkne.
+## Only transforms of nodes with [code]bb_id[/code] change, new instances
+## are added and those that disappeared in Blender are removed. Gameplay
+## nodes, Terrain3D and anything without [code]bb_id[/code] are left alone.
 
 class Plan extends RefCounted:
 	var moved: Array[Dictionary] = []
@@ -19,7 +19,7 @@ class Plan extends RefCounted:
 		return moved.is_empty() and added.is_empty() and removed.is_empty()
 
 	func summary() -> String:
-		return "přesunuto %d, přidáno %d, smazáno %d, zamčeno %d, nevyřešeno %d" % [
+		return "moved %d, added %d, removed %d, pinned %d, unresolved %d" % [
 			moved.size(), added.size(), removed.size(), pinned.size(), unresolved.size(),
 		]
 
@@ -35,8 +35,8 @@ static func read_json(path: String) -> Dictionary:
 	return parsed if parsed is Dictionary else {}
 
 
-## Spočítá, co by se ve scéně změnilo. Nic nemění — plán jde ukázat
-## uživateli dřív, než se do scény sáhne.
+## Works out what would change in the scene. Changes nothing, so the plan
+## can be shown to the user before the scene is touched.
 static func plan(root: Node, manifest: Dictionary, baseline: Dictionary) -> Plan:
 	var result: Plan = Plan.new()
 	var duplicates: Array[Node] = []
@@ -55,7 +55,7 @@ static func plan(root: Node, manifest: Dictionary, baseline: Dictionary) -> Plan
 		var target: Transform3D = _deserialize(entry.get("xform", []))
 		var node3d: Node3D = node as Node3D
 		if node3d == null:
-			result.unresolved.append("%s není Node3D" % node.name)
+			result.unresolved.append("%s is not a Node3D" % node.name)
 			continue
 		if BBManifest.global_xform(node3d, root).is_equal_approx(target):
 			continue
@@ -70,8 +70,8 @@ static func plan(root: Node, manifest: Dictionary, baseline: Dictionary) -> Plan
 	return result
 
 
-## V Blenderu po smazání rodiče děti zůstanou, v Godotu by zmizely s ním.
-## Takové děti se přidají znovu pod nejbližšího předka, který zůstává.
+## In Blender, children stay when their parent is deleted; in Godot they would
+## disappear with it. Such children are re-added under the nearest remaining ancestor.
 static func _rescue_children(root: Node, result: Plan, incoming: Dictionary, by_id: Dictionary) -> void:
 	if result.removed.is_empty():
 		return
@@ -99,13 +99,13 @@ static func _under_removed(node: Node, root: Node, removed: Array[Node]) -> bool
 	return false
 
 
-## Převede plán na seznam konkrétních operací nad scénou. Nic nemění —
-## samotný zápis dělá [method commit].
+## Turns the plan into a list of concrete operations on the scene. Changes
+## nothing; the actual write is done by [method commit].
 static func operations(root: Node, plan_data: Plan) -> Array[Dictionary]:
 	var ops: Array[Dictionary] = []
-	# Nové světové transformace všech přesouvaných nodů. Lokální transformace
-	# dítěte se musí počítat vůči NOVÉ pozici rodiče — v Blenderu se dítě
-	# s rodičem posunulo, takže by se jinak posunulo dvakrát.
+	# New world transforms of all moved nodes. A child's local transform must be
+	# computed against the parent's NEW position: in Blender the child moved
+	# with its parent, so it would otherwise move twice.
 	var targets: Dictionary = {}
 	for move: Dictionary in plan_data.moved:
 		targets[move["node"]] = move["xform"]
@@ -126,7 +126,7 @@ static func operations(root: Node, plan_data: Plan) -> Array[Dictionary]:
 	return ops
 
 
-## Provede operace. Instanční metoda, aby šla zavěsit do undo historie.
+## Runs the operations. An instance method so it can be hooked into undo history.
 func execute(ops: Array[Dictionary]) -> void:
 	for op: Dictionary in ops:
 		match op["kind"]:
@@ -151,11 +151,11 @@ func revert(ops: Array[Dictionary]) -> void:
 				op["node"].owner = op["owner"]
 
 
-## Zavěsí operace do undo historie scény jako jedinou akci.
+## Hooks the operations into the scene's undo history as a single action.
 ##
-## Kontext historie je kořen scény: operace se volají na pomocném objektu,
-## podle kterého by editor akci zařadil do globální historie a Ctrl+Z ve
-## scéně by ji nevrátil. Scéna se tím zároveň označí jako neuložená.
+## The history context is the scene root: the operations are called on a
+## helper object, by which the editor would put the action into the global
+## history and Ctrl+Z in the scene wouldn't undo it. This also marks the scene as unsaved.
 static func commit(root: Node, ops: Array[Dictionary], undo: EditorUndoRedoManager) -> void:
 	if ops.is_empty():
 		return
@@ -164,7 +164,7 @@ static func commit(root: Node, ops: Array[Dictionary], undo: EditorUndoRedoManag
 	undo.add_do_method(runner, &"execute", ops)
 	undo.add_undo_method(runner, &"revert", ops)
 	undo.add_do_reference(runner)
-	# Odpojené nody drží jen operace; bez reference by je uvolnil GC.
+	# Detached nodes are held only by the operations; without a reference the GC would free them.
 	for op: Dictionary in ops:
 		if op["kind"] == "add":
 			undo.add_do_reference(op["node"])
@@ -177,7 +177,7 @@ static func _build_add(root: Node, entry: Dictionary, plan_data: Plan, targets: 
 	var source: String = str(entry.get("src", ""))
 	var packed: PackedScene = load(source) as PackedScene
 	if packed == null:
-		plan_data.unresolved.append("nelze načíst %s" % source)
+		plan_data.unresolved.append("cannot load %s" % source)
 		return {}
 	var parent: Node = root.get_node_or_null(NodePath(str(entry.get("parent", "."))))
 	if parent == null:
@@ -211,9 +211,9 @@ static func _deserialize(xform: Array) -> Transform3D:
 	)
 
 
-## Manifest nese transformaci vůči kořeni scény. Node ale drží lokální,
-## takže se musí odečíst transformace rodičovského řetězce — kromě nodu
-## s [code]top_level[/code], jehož transformace už globální je.
+## The manifest carries the transform relative to the scene root, but a node
+## holds a local one, so the parent chain's transform must be removed, except
+## for a node with [code]top_level[/code], whose transform is already global.
 static func _to_local(node: Node3D, root: Node, world: Transform3D, targets: Dictionary) -> Transform3D:
 	if node.top_level:
 		return world
@@ -224,8 +224,8 @@ static func _to_local_under(parent: Node, root: Node, world: Transform3D, target
 	return _planned_global(parent, root, targets).affine_inverse() * world
 
 
-## Světová transformace nodu po provedení plánu: přesouvané nody mají
-## novou, ostatní skládají rodiče (včetně těch přesouvaných).
+## A node's world transform after the plan runs: moved nodes have the new
+## one, others compose their parents (including moved ones).
 static func _planned_global(node: Node, root: Node, targets: Dictionary) -> Transform3D:
 	if node == null or node == root:
 		return Transform3D.IDENTITY

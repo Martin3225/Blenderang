@@ -2,18 +2,18 @@
 class_name BBOwnership
 extends RefCounted
 
-## Určuje, kdo vlastní pozici nodu. Blender smí zapisovat pouze do nodů
-## označených metadatem [code]bb_id[/code]; všechno ostatní je pro něj
-## zamčená reference.
+## Decides who owns a node's position. Blender may write only to nodes
+## marked with the [code]bb_id[/code] metadata; everything else is a locked
+## reference for it.
 
 const META_ID: StringName = &"bb_id"
 const META_PINNED: StringName = &"bb_pinned"
 const META_ROOT: StringName = &"bb_root"
-## Všechna metadata mostu na nodu.
+## All the bridge's metadata on a node.
 const MARKS: Array[StringName] = [META_ID, META_PINNED, META_ROOT]
 
-## Přípony zdrojů, které jsou typicky autorované v Blenderu. Slouží jen
-## jako nápověda pro hromadné označování, ne jako kritérium vlastnictví.
+## Extensions of sources typically authored in Blender. Only a hint for
+## bulk marking, not a criterion of ownership.
 const ART_EXTENSIONS: PackedStringArray = ["glb", "gltf", "fbx", "blend", "obj"]
 
 
@@ -37,7 +37,7 @@ static func generate_id() -> String:
 	return "%08x%08x" % [randi(), randi()]
 
 
-## Přidělí nodu nové id. Vrací [code]false[/code], pokud už nějaké má.
+## Gives the node a new id. Returns [code]false[/code] if it already has one.
 static func assign_id(node: Node, taken: Dictionary) -> bool:
 	if is_blender_owned(node) and not taken.has(get_id(node)):
 		return false
@@ -48,8 +48,8 @@ static func assign_id(node: Node, taken: Dictionary) -> bool:
 	return true
 
 
-## Nod je kandidátem na správu z Blenderu, pokud je to Node3D instancovaný
-## z externí scény, jejíž zdroj je umělecký asset.
+## A node is a candidate for management from Blender if it's a Node3D instanced
+## from an external scene whose source is an art asset.
 static func looks_like_prop(node: Node) -> bool:
 	if not node is Node3D:
 		return false
@@ -59,9 +59,9 @@ static func looks_like_prop(node: Node) -> bool:
 	return ART_EXTENSIONS.has(src.get_extension().to_lower())
 
 
-## Hromadné označování vynechává vnitřnosti cizích instancí a cokoli
-## zavěšeného pod fyzikálním tělesem — to jsou gameplay celky, jejichž
-## skladbu Blender měnit nesmí.
+## Bulk marking skips the insides of other instances and anything under a
+## physics body; those are gameplay units whose composition Blender
+## must not change.
 static func is_auto_markable(node: Node, root: Node) -> bool:
 	if not looks_like_prop(node):
 		return false
@@ -75,8 +75,8 @@ static func is_auto_markable(node: Node, root: Node) -> bool:
 	return true
 
 
-## Projde strom a vrátí všechna již přidělená id. Duplicitní id (vzniklá
-## kopírováním nodu v editoru) hlásí v [code]duplicates[/code].
+## Walks the tree and returns all ids already assigned. Duplicate ids (created
+## by copying a node in the editor) are reported in [code]duplicates[/code].
 static func collect_ids(root: Node, duplicates: Array[Node]) -> Dictionary:
 	var taken: Dictionary = {}
 	var stack: Array[Node] = [root]
@@ -93,9 +93,9 @@ static func collect_ids(root: Node, duplicates: Array[Node]) -> Dictionary:
 	return taken
 
 
-## Značky všech nodů scény podle cesty od kořene. Godot při reimportu assetu
-## nahradí jeho instance v otevřené scéně novými nody a metadata instance
-## přitom zahodí — tímhle se dají vrátit, viz [method restore_marks].
+## Marks of all scene nodes by path from the root. When reimporting an asset,
+## Godot replaces its instances in the open scene with new nodes and drops the
+## instance metadata; these let you put them back, see [method restore_marks].
 static func snapshot_marks(root: Node) -> Dictionary:
 	var marks: Dictionary = {}
 	var stack: Array[Node] = [root]
@@ -112,8 +112,8 @@ static func snapshot_marks(root: Node) -> Dictionary:
 	return marks
 
 
-## Vrátí značky nodům, které o ně přišly. Node se musí shodovat cestou
-## i assetem; kdo nějakou značku má, je nedotčený. Vrací počet opravených nodů.
+## Gives marks back to nodes that lost them. A node must match by path and by
+## asset; a node that has any mark is left untouched. Returns the number of fixed nodes.
 static func restore_marks(root: Node, marks: Dictionary) -> int:
 	var restored: int = 0
 	for path: NodePath in marks:

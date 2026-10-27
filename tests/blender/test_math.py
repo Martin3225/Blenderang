@@ -1,4 +1,4 @@
-"""Převody souřadnic Godot ↔ Blender."""
+"""Godot ↔ Blender coordinate conversions."""
 
 import math
 import random
@@ -20,13 +20,13 @@ class ConversionTest(unittest.TestCase):
         self.assertEqual(tuple(round(v, 6) for v in matrix.translation), (0, 0, 5))
 
     def test_godot_forward_is_blender_forward(self):
-        # Godot −Z je dopředu, Blender +Y je dopředu.
+        # Godot −Z is forward, Blender +Y is forward.
         matrix = bridge.godot_to_blender(godot_xform(((1, 0, 0), (0, 1, 0), (0, 0, 1)), (0, 0, -3)))
         self.assertEqual(tuple(round(v, 6) for v in matrix.translation), (0, 3, 0))
 
     def test_rotation_about_up_axis_keeps_sign(self):
         angle = math.radians(30)
-        # Godot Basis(UP, 30°): sloupce x, y, z.
+        # Godot Basis(UP, 30°): columns x, y, z.
         basis = ((math.cos(angle), 0, -math.sin(angle)), (0, 1, 0), (math.sin(angle), 0, math.cos(angle)))
         matrix = bridge.godot_to_blender(godot_xform(basis, (0, 0, 0)))
         self.assertAlmostEqual(matrix.to_euler().z, angle, places=5)

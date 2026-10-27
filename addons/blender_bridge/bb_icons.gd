@@ -2,8 +2,8 @@
 class_name BBIcons
 extends RefCounted
 
-## Ikona pro tlačítka mostu. Bere se z editorového tématu, aby ladila
-## s ostatními ikonami a nemusel se do pluginu přidávat obrázek.
+## Icon for the bridge buttons. Taken from the editor theme so it matches
+## the other icons and no image needs to be added to the plugin.
 
 
 static func blender() -> Texture2D:

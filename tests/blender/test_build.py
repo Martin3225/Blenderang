@@ -1,4 +1,4 @@
-"""Stavba scény v Blenderu z manifestu (Godot → Blender)."""
+"""Building the scene in Blender from the manifest (Godot → Blender)."""
 
 import math
 import os
@@ -13,7 +13,7 @@ MODELS = ("Barrel", "Character", "Crate", "Detached", "Helmet", "InRotated", "To
 
 
 def write_source(asset: str, collection_name: str) -> str:
-    """Zdrojový .blend s jednou kolekcí, jak by ho vyrobil grafik."""
+    """A source .blend with one collection, as an artist would make it."""
     mesh = bpy.data.meshes.new(collection_name + "_src")
     mesh.from_pydata([(0, 0, 0), (1, 0, 0), (0, 1, 0)], [], [(0, 1, 2)])
     collection = bpy.data.collections.new(collection_name)
@@ -39,7 +39,7 @@ class BuildSceneTest(BridgeCase):
         self.open_scene()
         expected = {
             "Crate": (2, 0, 3),
-            "InRotated": (10, 2, -2),      # pod otočeným a zvětšeným rodičem
+            "InRotated": (10, 2, -2),      # under a rotated and scaled parent
             "Detached": (20, 0, 20),       # top_level
             "Character": (5, 0, -2),
         }
@@ -56,18 +56,18 @@ class BuildSceneTest(BridgeCase):
         scene_objects = set(scene.objects)
         for name in MODELS:
             source = bpy.data.objects[name].instance_collection
-            self.assertIsNotNone(source, "%s nemá geometrii" % name)
+            self.assertIsNotNone(source, "%s has no geometry" % name)
             meshes = [o for o in source.all_objects if o.type == "MESH"]
-            self.assertTrue(meshes, "%s: náhled bez meshe" % name)
+            self.assertTrue(meshes, "%s: preview without a mesh" % name)
             leaked = scene_objects & set(source.all_objects)
-            self.assertFalse(leaked, "%s: zdroj náhledu je i ve scéně (v počátku): %s" % (name, leaked))
+            self.assertFalse(leaked, "%s: the preview's source is also in the scene (at the origin): %s" % (name, leaked))
 
     def test_no_stray_objects_outside_bridge_collections(self):
         scene = self.open_scene()
         allowed = {bridge.COLL_LAYOUT, bridge.COLL_LOCKED}
         for obj in scene.objects:
             owners = {c.name for c in obj.users_collection}
-            self.assertTrue(owners & allowed, "%s leží mimo kolekce mostu: %s" % (obj.name, owners))
+            self.assertTrue(owners & allowed, "%s is outside the bridge collections: %s" % (obj.name, owners))
 
     def test_bone_shape_helpers_stay_out_of_model(self):
         self.open_scene()
@@ -77,8 +77,8 @@ class BuildSceneTest(BridgeCase):
             for obj in source.all_objects if obj.type == "ARMATURE"
             for bone in obj.pose.bones if bone.custom_shape
         }
-        self.assertTrue(any(o.type == "ARMATURE" for o in source.all_objects), "rig bez armatury")
-        self.assertFalse(shapes & set(source.all_objects), "tvary kostí se vykreslují jako součást modelu")
+        self.assertTrue(any(o.type == "ARMATURE" for o in source.all_objects), "rig without an armature")
+        self.assertFalse(shapes & set(source.all_objects), "bone shapes are drawn as part of the model")
 
     def test_fbx_asset_has_preview(self):
         self.open_scene()
@@ -92,7 +92,7 @@ class BuildSceneTest(BridgeCase):
         for name in ("Player", "Building", "Spawn", "Sun", "Sphere"):
             self.assertIn(name, names)
         building = bpy.data.objects["Building"]
-        self.assertTrue(any(c.type == "MESH" for c in building.children_recursive), "Building bez meshe")
+        self.assertTrue(any(c.type == "MESH" for c in building.children_recursive), "Building without a mesh")
         self.assertVectorAlmostEqual(building.matrix_world.translation, godot_to_blender_point(-10, 0, -10))
 
     def test_context_is_selectable_but_locked(self):
@@ -125,7 +125,7 @@ class BuildSceneTest(BridgeCase):
         bpy.ops.wm.read_homefile(use_empty=True)
         self.open_scene()
         linked = {bpy.data.objects[n].instance_collection for n in ("Crate", "InRotated", "Detached")}
-        self.assertEqual(len(linked), 1, "všechny instance sdílí jednu nalinkovanou kolekci")
+        self.assertEqual(len(linked), 1, "all instances share one linked collection")
         collection = linked.pop()
         self.assertIsNotNone(collection.library)
         self.assertTrue(bridge._same_file(bpy.path.abspath(collection.library.filepath), source))
@@ -144,10 +144,10 @@ class BuildSceneTest(BridgeCase):
 
     def test_terrain_is_real_mesh_in_world_space(self):
         if not os.path.exists(self.manifest_path("terrain")):
-            self.skipTest("Terrain3D není nainstalovaný")
+            self.skipTest("Terrain3D is not installed")
         self.open_scene("terrain")
         meshes = [o for o in self.collection_objects(bridge.COLL_LOCKED) if o.type == "MESH"]
-        self.assertEqual([o.name for o in meshes], ["TerrainMesh"], "jen terén, žádné interní meshe Terrain3D")
+        self.assertEqual([o.name for o in meshes], ["TerrainMesh"], "only the terrain, no internal Terrain3D meshes")
         terrain = meshes[0]
         self.assertGreater(len(terrain.data.vertices), 100)
         heights = [(terrain.matrix_world @ v.co).z for v in terrain.data.vertices]
@@ -168,28 +168,28 @@ class BuildSceneTest(BridgeCase):
 
 
 class ResilienceTest(BridgeCase):
-    """Jeden vadný soubor nesmí shodit stavbu celé scény."""
+    """One broken file must not crash building the whole scene."""
 
     def test_corrupt_context_falls_back_to_boxes(self):
         manifest = self.read_manifest()
         with open(os.path.join(harness.PROJECT, manifest["context_glb"]), "wb") as handle:
-            handle.write(b"glTF\x02\x00\x00\x00\x10\x01\x00\x00")   # jako prázdný export z editoru
+            handle.write(b"glTF\x02\x00\x00\x00\x10\x01\x00\x00")   # like an empty export from the editor
         scene = self.open_scene()
-        self.assertTrue(scene.get(bridge.S_MANIFEST), "scéna se dostavěla")
+        self.assertTrue(scene.get(bridge.S_MANIFEST), "the scene finished building")
         self.assertEqual(bpy.data.objects["Building"].type, "MESH")
         self.assertEqual(len(bpy.data.objects["Building"].data.vertices), 8)
-        self.assertTrue(any("kontext" in w for w in scene[bridge.S_WARNINGS]), list(scene[bridge.S_WARNINGS]))
+        self.assertTrue(any("context" in w for w in scene[bridge.S_WARNINGS]), list(scene[bridge.S_WARNINGS]))
         self.assertFalse([o for o in scene.objects if not o.users_collection or
                           not {c.name for c in o.users_collection} & {bridge.COLL_LAYOUT, bridge.COLL_LOCKED}],
-                         "po neúspěšném importu nic nezůstalo napůl")
+                         "nothing was left half-done after a failed import")
 
     def test_corrupt_asset_does_not_break_other_models(self):
         with open(os.path.join(harness.ASSETS, "tower.glb"), "wb") as handle:
             handle.write(b"not a glb")
         scene = self.open_scene()
         self.assertTrue(scene.get(bridge.S_MANIFEST))
-        self.assertIsNone(bpy.data.objects["Tower"].instance_collection, "rozbitý asset zůstane osou")
-        self.assertIsNotNone(bpy.data.objects["Crate"].instance_collection, "ostatní modely jsou v pořádku")
+        self.assertIsNone(bpy.data.objects["Tower"].instance_collection, "a broken asset stays an empty axis")
+        self.assertIsNotNone(bpy.data.objects["Crate"].instance_collection, "the other models are fine")
         self.assertTrue(any("Tower" in w for w in scene[bridge.S_WARNINGS]), list(scene[bridge.S_WARNINGS]))
 
     def test_clean_build_has_no_warnings(self):
@@ -203,21 +203,21 @@ class DetailTest(BridgeCase):
         kind, rows = bridge.describe(bpy.data.objects["InRotated"])
         values = dict(rows)
         self.assertEqual(kind, "model")
-        self.assertEqual(values["Node v Godotu"], "Rotated/InRotated")
-        self.assertEqual(values["Rodič"], "Rotated")
+        self.assertEqual(values["Godot node"], "Rotated/InRotated")
+        self.assertEqual(values["Parent"], "Rotated")
         self.assertEqual(values["Asset"], "fixtures/assets/crate.glb")
-        self.assertIn("fixtures/assets/crate.blend", values["Zdroj"])
+        self.assertIn("fixtures/assets/crate.blend", values["Source"])
 
     def test_godot_context_detail_names_the_godot_node(self):
         self.open_scene()
         mesh = next(c for c in bpy.data.objects["Building"].children_recursive if c.type == "MESH")
         kind, rows = bridge.describe(mesh)
         self.assertEqual(kind, "godot")
-        self.assertEqual(dict(rows)["Node v Godotu"], "Building")
+        self.assertEqual(dict(rows)["Godot node"], "Building")
 
     def test_helper_detail(self):
         self.open_scene()
-        helper = bpy.data.objects.new("Pomocna", None)
+        helper = bpy.data.objects.new("Helper", None)
         bpy.context.scene.collection.objects.link(helper)
         self.assertEqual(bridge.describe(helper)[0], "helper")
 
@@ -232,7 +232,7 @@ class HierarchyTest(BridgeCase):
         character.location.x += 2
         bridge.export(bpy.context.scene)
         sent = self.entry(self.read_manifest(), "Helmet")["xform"]
-        self.assertAlmostEqual(sent[9], 7.0, places=4, msg="posun rodiče se pošle i u dítěte")
+        self.assertAlmostEqual(sent[9], 7.0, places=4, msg="moving the parent is sent for the child too")
 
     def test_empties_are_about_one_metre(self):
         self.open_scene()
@@ -251,7 +251,7 @@ class ChooseSourceTest(BridgeCase):
         return os.path.join(harness.PROJECT, "fixtures", "shared_props.blend")
 
     def outside(self) -> str:
-        """Zdroj mimo projekt — třeba osobní složka grafika."""
+        """Source outside the project, e.g. an artist's personal folder."""
         path = os.path.join(os.path.dirname(harness.PROJECT), "outside_sources", "crate_master.blend")
         os.makedirs(os.path.dirname(path), exist_ok=True)
         write_source(os.path.relpath(path, harness.ASSETS), "crate_master")
@@ -265,7 +265,7 @@ class ChooseSourceTest(BridgeCase):
         path, personal = bridge.choose_source(scene, self.CRATE, source)
         self.assertEqual((path, personal), ("fixtures/shared_props.blend", False))
         with open(os.path.join(harness.ASSETS, "crate.glb.bbsrc"), encoding="utf-8") as handle:
-            self.assertEqual(handle.read(), "fixtures/shared_props.blend", "Godot čte stejný soubor")
+            self.assertEqual(handle.read(), "fixtures/shared_props.blend", "Godot reads the same file")
         for name in ("Crate", "InRotated", "Detached"):
             obj = bpy.data.objects[name]
             self.assertEqual(obj.get(bridge.P_TIER), "library", name)
@@ -278,13 +278,13 @@ class ChooseSourceTest(BridgeCase):
         path, personal = bridge.choose_source(scene, self.CRATE, source)
         self.assertTrue(personal)
         self.assertEqual(path, source)
-        self.assertFalse(os.path.exists(os.path.join(harness.ASSETS, "crate.glb.bbsrc")), "do projektu se nic sdíleného nezapíše")
+        self.assertFalse(os.path.exists(os.path.join(harness.ASSETS, "crate.glb.bbsrc")), "nothing shared is written to the project")
         self.assertEqual(bridge.local_sources(harness.PROJECT), {self.CRATE: source})
         with open(os.path.join(harness.PIPELINE, "local", ".gitignore"), encoding="utf-8") as handle:
-            self.assertEqual(handle.read().strip(), "*", "osobní výběr se nikdy necommitne")
+            self.assertEqual(handle.read().strip(), "*", "a personal choice is never committed")
         self.assertIsNotNone(bpy.data.objects["Crate"].instance_collection.library)
         self.assertEqual(bridge.source_choice(harness.PROJECT, self.CRATE), "personal")
-        self.assertIn("jen u tebe", dict(bridge.describe(bpy.data.objects["Crate"])[1])["Zdroj"])
+        self.assertIn("only for you", dict(bridge.describe(bpy.data.objects["Crate"])[1])["Source"])
 
     def test_personal_source_wins_and_survives_reload(self):
         shared = self.shared()
@@ -295,7 +295,7 @@ class ChooseSourceTest(BridgeCase):
         bridge.choose_source(scene, self.CRATE, personal)
         bpy.ops.bb.rebuild()
         self.assertEqual(bpy.data.objects["Crate"].get(bridge.P_SRC_BLEND), personal)
-        self.assertTrue(os.path.exists(os.path.join(harness.ASSETS, "crate.glb.bbsrc")), "sdílený výběr ostatních zůstal")
+        self.assertTrue(os.path.exists(os.path.join(harness.ASSETS, "crate.glb.bbsrc")), "the others' shared choice stays")
 
     def test_clear_personal_falls_back_to_shared(self):
         shared = self.shared()
@@ -345,14 +345,14 @@ class ChooseSourceTest(BridgeCase):
 class TerrainMaterialTest(BridgeCase):
     def test_terrain_has_textured_material(self):
         if not os.path.exists(self.manifest_path("terrain")):
-            self.skipTest("Terrain3D není nainstalovaný")
+            self.skipTest("Terrain3D is not installed")
         self.open_scene("terrain")
         terrain = bpy.data.objects["TerrainMesh"]
-        self.assertTrue(terrain.data.uv_layers, "terén má UV")
+        self.assertTrue(terrain.data.uv_layers, "terrain has UVs")
         material = terrain.active_material
-        self.assertIsNotNone(material, "terén má materiál")
+        self.assertIsNotNone(material, "terrain has a material")
         images = [n.image for n in material.node_tree.nodes if n.type == "TEX_IMAGE" and n.image]
-        self.assertEqual(len(images), 1, "materiál má upečenou texturu")
+        self.assertEqual(len(images), 1, "the material has a baked texture")
         self.assertEqual(tuple(images[0].size), (256, 256))
 
 
@@ -362,8 +362,8 @@ class FilterTest(BridgeCase):
         models = bridge.scene_models(scene)
         names = lambda text: [o.name for o in bridge.filter_models(models, text)]
         self.assertEqual(names(""), list(MODELS))
-        self.assertEqual(names("tow"), ["Tower"], "část jména")
-        self.assertEqual(names("ROTATED"), ["Detached", "InRotated"], "cesta v Godotu, bez ohledu na velikost")
-        self.assertEqual(names("crate.glb"), ["Crate", "Detached", "Helmet", "InRotated"], "jméno assetu")
-        self.assertEqual(names("crate rotated"), ["Detached", "InRotated"], "víc slov = všechna")
-        self.assertEqual(names("nic takoveho"), [])
+        self.assertEqual(names("tow"), ["Tower"], "part of the name")
+        self.assertEqual(names("ROTATED"), ["Detached", "InRotated"], "Godot path, case-insensitive")
+        self.assertEqual(names("crate.glb"), ["Crate", "Detached", "Helmet", "InRotated"], "asset name")
+        self.assertEqual(names("crate rotated"), ["Detached", "InRotated"], "several words = all of them")
+        self.assertEqual(names("nothing like this"), [])

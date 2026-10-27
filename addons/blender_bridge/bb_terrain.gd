@@ -2,35 +2,35 @@
 class_name BBTerrain
 extends RefCounted
 
-## Terén z Terrain3D pro Blender: mesh s UV a materiálem s upečenou barvou.
+## Terrain3D terrain for Blender: a mesh with UVs and a material with baked colour.
 ##
-## Terrain3D kreslí terén vlastním shaderem (splatting z texturového pole,
-## control mapa, auto shader podle sklonu), který do Blenderu 1:1 převést
-## nejde. Místo toho se shora upeče barevná mapa: v každém pixelu průměrná
-## barva textur, které tam control mapa (nebo auto shader) míchá, vynásobená
-## barevnou mapou terénu. Na rozmisťování to stačí — je vidět, kde je tráva,
-## skála, písek nebo cesta.
+## Terrain3D draws terrain with its own shader (splatting from a texture array,
+## control map, slope-based auto shader), which can't be reproduced 1:1 in
+## Blender. Instead a colour map is baked from above: in each pixel the average
+## colour of the textures the control map (or auto shader) blends there, multiplied
+## by the terrain's colour map. That's enough for layout: you can see where grass,
+## rock, sand or a path is.
 ##
-## Pečení je drahé, takže se mesh i textura ukládají vedle manifestu a znovu
-## se počítají, jen když se změnila data terénu, jeho materiál nebo nastavení.
+## Baking is expensive, so the mesh and texture are cached next to the manifest and
+## recomputed only when the terrain data, its material or the settings change.
 ##
-## Rozlišení je v [code]Project Settings ▸ Blender Bridge ▸ Terrain[/code],
-## platí pro celý tým.
+## Resolution is in [code]Project Settings ▸ Blender Bridge ▸ Terrain[/code],
+## and applies to the whole team.
 
 const SETTING_SPACING: String = "blender_bridge/terrain/mesh_spacing_m"
 const SETTING_TEXTURE: String = "blender_bridge/terrain/texture_size"
-## Vzdálenost vrcholů meshe v metrech. Terrain3D peče po mocninách dvou
-## vzdálenosti svých vrcholů (LOD 0–8).
+## Distance between mesh vertices in metres. Terrain3D bakes in powers of two
+## of its vertex spacing (LOD 0–8).
 const DEFAULT_SPACING: int = 8
-## Delší strana upečené textury v pixelech.
+## Longer side of the baked texture in pixels.
 const DEFAULT_TEXTURE: int = 2048
 const MAX_LOD: int = 8
-## Nad tolik vrcholů se upozorní — Blender i glTF export pak budou pomalé.
+## Above this many vertices a warning is shown; Blender and glTF export will be slow.
 const WARN_VERTICES: int = 4_000_000
 
 
-## Zaregistruje nastavení, aby byla vidět v Project Settings. Hodnota rovná
-## výchozí se do project.godot neuloží.
+## Registers the settings so they show up in Project Settings. A value equal
+## to the default isn't saved to project.godot.
 static func register_settings() -> void:
 	_register(SETTING_SPACING, DEFAULT_SPACING, "1 m:1,2 m:2,4 m:4,8 m:8,16 m:16,32 m:32")
 	_register(SETTING_TEXTURE, DEFAULT_TEXTURE, "1024 px:1024,2048 px:2048,4096 px:4096,8192 px:8192")
@@ -44,8 +44,8 @@ static func _register(name: String, value: int, hint: String) -> void:
 	ProjectSettings.set_as_basic(name, true)
 
 
-## LOD pro [code]bake_mesh[/code]: nejbližší mocnina dvou k nastavené
-## vzdálenosti vrcholů, vztažená k vertex_spacing terénu.
+## LOD for [code]bake_mesh[/code]: the power of two closest to the configured
+## vertex spacing, relative to the terrain's vertex_spacing.
 static func mesh_lod(terrain: Node3D) -> int:
 	var meters: float = float(ProjectSettings.get_setting(SETTING_SPACING, DEFAULT_SPACING))
 	var ratio: float = maxf(1.0, meters / float(terrain.get("vertex_spacing")))
@@ -56,9 +56,9 @@ static func texture_size() -> int:
 	return clampi(int(ProjectSettings.get_setting(SETTING_TEXTURE, DEFAULT_TEXTURE)), 256, 16384)
 
 
-## Mesh terénu s UV přes celý terén a materiálem s upečenou barvou.
-## [param cache_base] je cesta bez přípony, kam se ukládá mesh, textura
-## a podpisy.
+## Terrain mesh with UVs across the whole terrain and a material with baked colour.
+## [param cache_base] is the path without extension where the mesh, texture
+## and signatures are stored.
 static func mesh_with_material(terrain: Node3D, cache_base: String) -> Mesh:
 	var mesh: ArrayMesh = terrain_mesh(terrain, cache_base)
 	if mesh == null:
@@ -71,7 +71,7 @@ static func mesh_with_material(terrain: Node3D, cache_base: String) -> Mesh:
 	return mesh
 
 
-## Mesh terénu s UV, z cache, pokud se terén ani rozlišení nezměnily.
+## Terrain mesh with UVs, from cache if neither the terrain nor the resolution changed.
 static func terrain_mesh(terrain: Node3D, cache_base: String) -> ArrayMesh:
 	var lod: int = mesh_lod(terrain)
 	var parts: PackedStringArray = ["lod:%d" % lod, "spacing:%s" % terrain.get("vertex_spacing")]
@@ -98,7 +98,7 @@ static func _bake_mesh(terrain: Node3D, lod: int) -> ArrayMesh:
 	var arrays: Array = baked.surface_get_arrays(0)
 	var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 	if vertices.size() > WARN_VERTICES:
-		push_warning("Blender Bridge: terén má %d vrcholů, Blender bude pomalý. Sniž %s." % [vertices.size(), SETTING_SPACING])
+		push_warning("Blender Bridge: terrain has %d vertices, Blender will be slow. Lower %s." % [vertices.size(), SETTING_SPACING])
 	var uvs: PackedVector2Array = PackedVector2Array()
 	uvs.resize(vertices.size())
 	for index: int in vertices.size():
@@ -110,7 +110,7 @@ static func _bake_mesh(terrain: Node3D, lod: int) -> ArrayMesh:
 	return mesh
 
 
-## Upečená barva terénu shora, z cache, pokud se terén nezměnil.
+## Baked top-down colour of the terrain, from cache if the terrain didn't change.
 static func albedo(terrain: Node3D, aabb: AABB, cache_base: String) -> Image:
 	var signature: String = _albedo_signature(terrain, aabb)
 	var image_path: String = cache_base + ".terrain.png"
@@ -158,7 +158,7 @@ static func _color_at(data: Object, position: Vector3, palette: PackedColorArray
 	if auto["enabled"] and Terrain3DUtil.is_auto(control):
 		var normal: Vector3 = data.call("get_normal", position)
 		var elevation: float = data.call("get_height", position)
-		# Stejný vzorec jako shader Terrain3D (auto_blend).
+		# Same formula as the Terrain3D shader (auto_blend).
 		blend = clampf(auto["slope"] * 2.0 * (normal.y - 1.0) + 1.0 - auto["height_reduction"] * 0.01 * elevation, 0.0, 1.0)
 		base = auto["base"]
 		overlay = auto["overlay"]
@@ -178,8 +178,8 @@ static func _pick(palette: PackedColorArray, index: int) -> Color:
 	return palette[index] if index >= 0 and index < palette.size() else Color(0.5, 0.5, 0.5)
 
 
-## Průměrná barva každé textury terénu (zmenšením až na 1×1 px), vynásobená
-## albedo_color assetu.
+## Average colour of each terrain texture (downscaled to 1×1 px), multiplied
+## by the asset's albedo_color.
 static func _palette(terrain: Node3D) -> PackedColorArray:
 	var palette: PackedColorArray = PackedColorArray()
 	var assets: Object = terrain.get("assets")
@@ -222,9 +222,9 @@ static func _auto_shader(terrain: Node3D) -> Dictionary:
 	}
 
 
-## Parametr shaderu z uložených hodnot materiálu. [code]get_shader_param[/code]
-## se ptá rendereru a bez něj (headless, testy) vrací null; slovník
-## [code]_shader_parameters[/code] je k dispozici vždy.
+## Shader parameter from the material's stored values. [code]get_shader_param[/code]
+## asks the renderer and returns null without one (headless, tests); the
+## [code]_shader_parameters[/code] dictionary is always available.
 static func _param(material: Object, name: String, fallback: float) -> float:
 	if material == null:
 		return fallback
@@ -235,8 +235,8 @@ static func _param(material: Object, name: String, fallback: float) -> float:
 	return float(value) if value != null else fallback
 
 
-## Co ovlivňuje upečenou barvu: data terénu, textury a parametry auto
-## shaderu, rozsah a rozlišení.
+## What affects the baked colour: terrain data, textures and auto shader
+## parameters, extent and resolution.
 static func _albedo_signature(terrain: Node3D, aabb: AABB) -> String:
 	var parts: PackedStringArray = [str(aabb), str(texture_size()), str(_auto_shader(terrain))]
 	parts += _data_parts(terrain)
@@ -250,7 +250,7 @@ static func _albedo_signature(terrain: Node3D, aabb: AABB) -> String:
 	return _signature(parts)
 
 
-## Soubory regionů terénu a čas jejich změny.
+## Terrain region files and their modification times.
 static func _data_parts(terrain: Node3D) -> PackedStringArray:
 	var parts: PackedStringArray = []
 	var directory: String = str(terrain.get("data_directory"))

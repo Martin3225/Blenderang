@@ -2,37 +2,37 @@
 class_name BBPaths
 extends RefCounted
 
-## Mapování mezi importovaným assetem v [code]res://[/code] a jeho zdrojovým
-## [code].blend[/code] souborem.
+## Mapping between an imported asset in [code]res://[/code] and its source
+## [code].blend[/code] file.
 ##
-## Zdroj leží [b]vedle[/b] exportovaného assetu se stejným názvem:
-## [code]zviretice.glb[/code] → [code]zviretice.blend[/code]. Když to nesedí
-## (jeden .blend exportuje víc assetů, nebo zdroj pravdy drží layout scény),
-## zapíše se přesná cesta do souboru [code]<asset>.bbsrc[/code] vedle assetu.
+## The source sits [b]next to[/b] the exported asset with the same name:
+## [code]castle.glb[/code] → [code]castle.blend[/code]. When that doesn't fit
+## (one .blend exports several assets, or the scene layout holds the source of truth),
+## the exact path is written to a [code]<asset>.bbsrc[/code] file next to the asset.
 ##
-## Godot má v [code]project.godot[/code] vypnutý import .blend
-## ([code]filesystem/import/blender/enabled=false[/code]), takže zdrojové
-## soubory můžou ležet kdekoli v projektu, aniž by je kdokoli bez Blenderu
-## musel řešit.
+## Godot has .blend import turned off in [code]project.godot[/code]
+## ([code]filesystem/import/blender/enabled=false[/code]), so source
+## files can live anywhere in the project without anyone who lacks Blender
+## having to deal with them.
 ##
-## Žádný centrální index assetů neexistuje záměrně — jeden soubor, do kterého
-## zapisuje celý tým, je zdroj merge konfliktů.
+## There is deliberately no central asset index: one file the whole team
+## writes to is a source of merge conflicts.
 
 const OVERRIDE_EXTENSION: String = "bbsrc"
 const SOURCE_EXTENSION: String = "blend"
 
-## Osobní výběr zdrojů mimo projekt. Adresář má vlastní .gitignore s „*“,
-## takže se nikdy necommitne a do týmového .gitignore se sahat nemusí.
+## Personal choice of sources outside the project. The folder has its own .gitignore with "*",
+## so it's never committed and the team's .gitignore doesn't need touching.
 const LOCAL_DIR: String = "res://.pipeline/local"
 const LOCAL_SOURCES: String = "res://.pipeline/local/sources.json"
 
 
-## Cesta ke zdrojovému [code].blend[/code]: relativně ke kořeni projektu
-## (Blender o [code]res://[/code] neví), nebo absolutní u osobního zdroje
-## mimo projekt. Prázdný řetězec znamená, že zdroj neexistuje.
+## Path to the source [code].blend[/code]: relative to the project root
+## (Blender doesn't know [code]res://[/code]), or absolute for a personal source
+## outside the project. An empty string means there is no source.
 ##
-## Pořadí: osobní výběr (jen u tebe) → [code].bbsrc[/code] (sdílený) →
-## [code].blend[/code] vedle assetu.
+## Order: personal choice (only for you) → [code].bbsrc[/code] (shared) →
+## [code].blend[/code] next to the asset.
 static func source_for(asset_path: String) -> String:
 	if asset_path.is_empty():
 		return ""
@@ -45,14 +45,14 @@ static func source_for(asset_path: String) -> String:
 	return candidate if FileAccess.file_exists("res://" + candidate) else ""
 
 
-## Leží soubor v projektu? Jen takovou cestu jde sdílet přes [code].bbsrc[/code].
+## Is the file inside the project? Only such a path can be shared via [code].bbsrc[/code].
 static func is_inside_project(absolute_path: String) -> bool:
 	return ProjectSettings.localize_path(absolute_path).begins_with("res://")
 
 
-## Nastaví vybraný soubor jako zdroj assetu. V projektu → sdílený
-## [code].bbsrc[/code] (a zruší případný osobní výběr); mimo projekt →
-## osobní záznam, který ostatní neuvidí. Vrací [code]true[/code] u osobního.
+## Sets the chosen file as the asset's source. Inside the project → shared
+## [code].bbsrc[/code] (and clears any personal choice); outside the project →
+## a personal entry others won't see. Returns [code]true[/code] for a personal one.
 static func choose_source(asset_path: String, absolute_path: String) -> bool:
 	if is_inside_project(absolute_path):
 		var relative: String = ProjectSettings.localize_path(absolute_path).trim_prefix("res://")
@@ -67,7 +67,7 @@ static func read_local(asset_path: String) -> String:
 	return str(_local_sources().get(asset_path, ""))
 
 
-## Zapíše osobní zdroj (absolutní cesta). Prázdná cesta záznam smaže.
+## Writes a personal source (absolute path). An empty path deletes the entry.
 static func write_local(asset_path: String, absolute_path: String) -> bool:
 	var sources: Dictionary = _local_sources()
 	if absolute_path.is_empty():
@@ -96,13 +96,13 @@ static func _local_sources() -> Dictionary:
 	return parsed if parsed is Dictionary else {}
 
 
-## Cesta, na kterou se zdroj očekává, i když tam zatím není: vedle assetu,
-## stejný název, přípona [code].blend[/code].
+## Path where the source is expected even if it isn't there yet: next to the asset,
+## same name, [code].blend[/code] extension.
 static func expected_source_for(asset_path: String) -> String:
 	return asset_path.trim_prefix("res://").get_basename() + "." + SOURCE_EXTENSION
 
 
-## Přesná cesta zapsaná ve [code]<asset>.bbsrc[/code], nebo prázdno.
+## The exact path written in [code]<asset>.bbsrc[/code], or empty.
 static func read_override(asset_path: String) -> String:
 	var marker: String = override_path(asset_path)
 	if not FileAccess.file_exists(marker):
@@ -119,7 +119,7 @@ static func override_path(asset_path: String) -> String:
 	return "%s.%s" % [asset_path, OVERRIDE_EXTENSION]
 
 
-## Zapíše výjimku. Prázdná cesta výjimku smaže a vrátí se ke konvenci.
+## Writes the override. An empty path deletes it and falls back to the convention.
 static func write_override(asset_path: String, blend_path: String) -> bool:
 	var marker: String = override_path(asset_path)
 	if blend_path.is_empty():
@@ -135,14 +135,14 @@ static func write_override(asset_path: String, blend_path: String) -> bool:
 	return true
 
 
-## Kde leží zdroj pravdy pro geometrii assetu.
+## Where the source of truth for the asset's geometry lives.
 ##
-## [code]library[/code] — vlastní [code].blend[/code], do Blenderu se
-## linkuje a upravuje se v něm.
-## [code]none[/code] — zdroj chybí; Blender ukáže model z [code].glb[/code]
-## a nabídne z něj zdroj vyrobit.
+## [code]library[/code]: its own [code].blend[/code], linked into Blender
+## and edited there.
+## [code]none[/code]: no source; Blender shows the model from the [code].glb[/code]
+## and offers to make a source from it.
 ##
-## Scéna sama žádný .blend nemá: rozmístění je vždycky v [code].tscn[/code]
-## a Blender si ho pokaždé postaví z manifestu.
+## The scene itself has no .blend: the layout is always in the [code].tscn[/code]
+## and Blender builds it from the manifest each time.
 static func tier_for(asset_path: String) -> String:
 	return "none" if source_for(asset_path).is_empty() else "library"

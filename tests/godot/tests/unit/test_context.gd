@@ -1,6 +1,6 @@
 extends "res://tests/bb_test.gd"
 
-## Geometrie kontextu (.context.glb) — co z Godotu uvidí Blender jako zamčené okolí.
+## Context geometry (.context.glb): what Blender sees from Godot as locked surroundings.
 
 
 func _load_context(path: String) -> Node:
@@ -27,16 +27,16 @@ func test_context_has_real_geometry_of_godot_nodes() -> void:
 	mark_props(root)
 	BBManifest.write(root)
 	var context: Node = _load_context("res://.pipeline/basic.context.glb")
-	check(context != null, "context.glb jde načíst")
+	check(context != null, "context.glb loads")
 	if context == null:
 		done()
 		return
 	for name: String in ["Player", "Building", "Sphere"]:
 		var unit: Node = context.find_child(name, true, false)
-		check(unit != null and not _meshes(unit).is_empty(), "%s má mesh" % name)
-	check(context.find_child("Helmet", true, false) == null, "výstroj modelu je v Blenderu jako model, ne kontext")
+		check(unit != null and not _meshes(unit).is_empty(), "%s has a mesh" % name)
+	check(context.find_child("Helmet", true, false) == null, "a model's gear is a model in Blender, not context")
 	for name: String in ["Spawn", "Sun", "Socket"]:
-		check(context.find_child(name, true, false) != null, "%s je v kontextu jako prázdný node" % name)
+		check(context.find_child(name, true, false) != null, "%s is in the context as an empty node" % name)
 	done()
 
 
@@ -61,53 +61,53 @@ func test_context_excludes_blender_owned_geometry() -> void:
 	for mesh: MeshInstance3D in _meshes(context):
 		if mesh.mesh != null and mesh.mesh.get_aabb().size.is_equal_approx(Vector3.ONE):
 			crates += 1
-	# Crate, InRotated a Detached jsou v Blenderu jako modely; v kontextu je jen
-	# neoznačená Decoration na střeše Building.
-	eq(crates, 1, "počet krychlí v kontextu")
+	# Crate, InRotated and Detached are models in Blender; the context only has
+	# the unmarked Decoration on the Building's roof.
+	eq(crates, 1, "number of cubes in the context")
 	done()
 
 
 func test_terrain_is_baked_in_world_space() -> void:
 	if not ClassDB.class_exists("Terrain3D"):
-		skip("Terrain3D není nainstalovaný")
+		skip("Terrain3D is not installed")
 		return
 	clear_pipeline()
 	var root: Node = scene("terrain")
 	await tree.process_frame
 	mark_props(root)
 	var manifest: Dictionary = BBManifest.export_scene(root)
-	near(origin_of(entry(manifest, "Terrain3D")), Vector3.ZERO, "Terrain3D je top_level, posun Nav se nepočítá")
-	near(origin_of(entry(manifest, "CrateOnHill")), Vector3(128, 20, 128), "krabice na kopci")
+	near(origin_of(entry(manifest, "Terrain3D")), Vector3.ZERO, "Terrain3D is top_level, the Nav offset doesn't count")
+	near(origin_of(entry(manifest, "CrateOnHill")), Vector3(128, 20, 128), "box on the hill")
 
 	BBManifest.write(root)
 	var context: Node = _load_context("res://.pipeline/terrain.context.glb")
 	var meshes: Array[MeshInstance3D] = _meshes(context.find_child("Terrain3D", true, false))
-	check(meshes.size() == 1, "terén je jeden mesh")
-	eq(_meshes(context).size(), 1, "žádné interní meshe Terrain3D (MouseQuad) ani duplikáty pod Nav")
+	check(meshes.size() == 1, "terrain is one mesh")
+	eq(_meshes(context).size(), 1, "no internal Terrain3D meshes (MouseQuad) or duplicates under Nav")
 	if meshes.size() == 1:
 		var aabb: AABB = meshes[0].global_transform * meshes[0].mesh.get_aabb()
-		near(aabb.position.x, 0.0, "terén začíná na x=0", 0.5)
-		near(aabb.end.x, 256.0, "terén končí na x=256", 16.5)
+		near(aabb.position.x, 0.0, "terrain starts at x=0", 0.5)
+		near(aabb.end.x, 256.0, "terrain ends at x=256", 16.5)
 		near(aabb.end.y, 20.0, "vrchol kopce", 1.0)
 	done()
 
 
-## Terén pod NavigationRegion3D, ve kterém není žádný model (všechno
-## neoznačené). Nav je jako proxy jeden celek, terén ale musí dostat vlastní
-## záznam — vnitřní meshe Terrain3D nemají ownera a do celku Nav se nedostanou.
+## Terrain under a NavigationRegion3D with no model in it (everything
+## unmarked). Nav is a single proxy unit, but the terrain must get its own
+## entry: Terrain3D's internal meshes have no owner and don't get into the Nav unit.
 func test_terrain_under_unmarked_parent_is_kept() -> void:
 	if not ClassDB.class_exists("Terrain3D"):
-		skip("Terrain3D není nainstalovaný")
+		skip("Terrain3D is not installed")
 		return
 	clear_pipeline()
 	var root: Node = scene("terrain")
 	await tree.process_frame
 	var manifest: Dictionary = BBManifest.export_scene(root)
-	eq(entry(manifest, "Terrain3D").get("kind"), "terrain", "terén má záznam")
+	eq(entry(manifest, "Terrain3D").get("kind"), "terrain", "terrain has an entry")
 	BBManifest.write(root)
 	var context: Node = _load_context("res://.pipeline/terrain.context.glb")
-	eq(_meshes(context.find_child("Terrain3D", true, false)).size(), 1, "terén v kontextu")
-	eq(_meshes(context).size(), 2, "terén a krabice, nic dvakrát")
+	eq(_meshes(context.find_child("Terrain3D", true, false)).size(), 1, "terrain in the context")
+	eq(_meshes(context).size(), 2, "terrain and box, nothing twice")
 	done()
 
 
@@ -119,56 +119,56 @@ func _terrain_root() -> Node:
 
 
 func _pixel(image: Image, world_x: int, world_z: int) -> Color:
-	# Region je 0–256 m a textura má 1 px na metr.
+	# The region is 0–256 m and the texture has 1 px per metre.
 	return image.get_pixel(world_x, world_z)
 
 
 func test_terrain_has_baked_material() -> void:
 	if not ClassDB.class_exists("Terrain3D"):
-		skip("Terrain3D není nainstalovaný")
+		skip("Terrain3D is not installed")
 		return
 	clear_pipeline()
 	var root: Node = await _terrain_root()
 	BBManifest.write(root)
 	var context: Node = _load_context("res://.pipeline/terrain.context.glb")
 	var meshes: Array[MeshInstance3D] = _meshes(context.find_child("Terrain3D", true, false))
-	check(meshes.size() == 1, "terén v kontextu")
+	check(meshes.size() == 1, "terrain in the context")
 	if meshes.size() == 1:
 		var material: StandardMaterial3D = meshes[0].get_active_material(0) as StandardMaterial3D
-		check(material != null and material.albedo_texture != null, "terén má materiál s texturou")
+		check(material != null and material.albedo_texture != null, "terrain has a material with a texture")
 		var arrays: Array = meshes[0].mesh.surface_get_arrays(0)
-		check(arrays[Mesh.ARRAY_TEX_UV] != null, "terén má UV")
+		check(arrays[Mesh.ARRAY_TEX_UV] != null, "terrain has UVs")
 	done()
 
 
 func test_terrain_colors_follow_painting() -> void:
 	if not ClassDB.class_exists("Terrain3D"):
-		skip("Terrain3D není nainstalovaný")
+		skip("Terrain3D is not installed")
 		return
 	clear_pipeline()
 	var root: Node = await _terrain_root()
 	BBManifest.write(root)
 	var image: Image = Image.load_from_file(ProjectSettings.globalize_path("res://.pipeline/terrain.terrain.png"))
-	check(image != null, "upečená textura je v cache")
+	check(image != null, "the baked texture is in the cache")
 	if image == null:
 		done()
 		return
-	eq(image.get_size(), Vector2i(256, 256), "1 px na metr u malého terénu")
+	eq(image.get_size(), Vector2i(256, 256), "1 px per metre for a small terrain")
 	var sand: Color = Color(0.8, 0.7, 0.4)
-	near(_vec(_pixel(image, 64, 200)), _vec(sand), "ručně malovaný písek", 0.03)
-	near(_vec(_pixel(image, 10, 10)), _vec(sand * Color(1, 0.5, 0.5)), "barevná mapa obarví písek", 0.03)
+	near(_vec(_pixel(image, 64, 200)), _vec(sand), "hand-painted sand", 0.03)
+	near(_vec(_pixel(image, 10, 10)), _vec(sand * Color(1, 0.5, 0.5)), "colour map tints the sand", 0.03)
 	var flat: Color = _pixel(image, 240, 10)
-	near(_vec(flat), Vector3(0.2, 0.6, 0.2), "auto shader: rovina je tráva", 0.03)
+	near(_vec(flat), Vector3(0.2, 0.6, 0.2), "auto shader: flat ground is grass", 0.03)
 	var slope: Color = _pixel(image, 150, 110)
 	var rock: Vector3 = Vector3(0.5, 0.5, 0.5)
 	check(_vec(slope).distance_to(rock) < _vec(flat).distance_to(rock) - 0.05,
-		"auto shader: svah je víc skála než rovina (%s vs %s)" % [slope, flat])
+		"auto shader: a slope is more rock than flat ground (%s vs %s)" % [slope, flat])
 	done()
 
 
 func test_terrain_bake_is_cached() -> void:
 	if not ClassDB.class_exists("Terrain3D"):
-		skip("Terrain3D není nainstalovaný")
+		skip("Terrain3D is not installed")
 		return
 	clear_pipeline()
 	var root: Node = await _terrain_root()
@@ -179,22 +179,22 @@ func test_terrain_bake_is_cached() -> void:
 	BBTerrain.albedo(terrain, aabb, base)
 	var signature: String = FileAccess.get_file_as_string(base + ".terrain.sig")
 	write_file(base + ".terrain.png.marker", "")
-	# Cache: druhé volání se stejným terénem nepeče znovu.
+	# Cache: a second call with the same terrain doesn't bake again.
 	var image: Image = Image.create_empty(1, 1, false, Image.FORMAT_RGB8)
 	image.save_png(ProjectSettings.globalize_path(base + ".terrain.png"))
-	eq(BBTerrain.albedo(terrain, aabb, base).get_size(), Vector2i(1, 1), "beze změny terénu se vezme cache")
-	# Změna materiálu (auto shader) cache zneplatní.
+	eq(BBTerrain.albedo(terrain, aabb, base).get_size(), Vector2i(1, 1), "without a terrain change the cache is used")
+	# A material change (auto shader) invalidates the cache.
 	terrain.get("material").call("set_shader_param", "auto_slope", 3.0)
-	eq(BBTerrain.albedo(terrain, aabb, base).get_size(), Vector2i(256, 256), "po změně materiálu se peče znovu")
-	check(FileAccess.get_file_as_string(base + ".terrain.sig") != signature, "nový podpis")
+	eq(BBTerrain.albedo(terrain, aabb, base).get_size(), Vector2i(256, 256), "after a material change it bakes again")
+	check(FileAccess.get_file_as_string(base + ".terrain.sig") != signature, "new signature")
 	done()
 
 
-## Vzdálenost vrcholů z Project Settings; mesh se bere z cache, dokud se
-## nastavení nezmění.
+## Vertex spacing from Project Settings; the mesh comes from the cache until
+## the setting changes.
 func test_terrain_resolution_follows_setting() -> void:
 	if not ClassDB.class_exists("Terrain3D"):
-		skip("Terrain3D není nainstalovaný")
+		skip("Terrain3D is not installed")
 		return
 	clear_pipeline()
 	var root: Node = await _terrain_root()
@@ -202,8 +202,8 @@ func test_terrain_resolution_follows_setting() -> void:
 	var base: String = "res://.pipeline/resolution_test"
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://.pipeline"))
 	ProjectSettings.set_setting(BBTerrain.SETTING_SPACING, 4)
-	# Terén 256 m: po 4 m 65 × 65 vrcholů.
-	eq(_vertex_count(BBTerrain.terrain_mesh(terrain, base)), 65 * 65, "vrchol každé 4 m")
+	# 256 m terrain: every 4 m gives 65 × 65 vertices.
+	eq(_vertex_count(BBTerrain.terrain_mesh(terrain, base)), 65 * 65, "a vertex every 4 m")
 
 	var fake: ArrayMesh = ArrayMesh.new()
 	var arrays: Array = []
@@ -211,12 +211,12 @@ func test_terrain_resolution_follows_setting() -> void:
 	arrays[Mesh.ARRAY_VERTEX] = PackedVector3Array([Vector3.ZERO, Vector3.RIGHT, Vector3.FORWARD])
 	fake.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	ResourceSaver.save(fake, base + ".terrain.res")
-	eq(_vertex_count(BBTerrain.terrain_mesh(terrain, base)), 3, "beze změny se vezme mesh z cache")
+	eq(_vertex_count(BBTerrain.terrain_mesh(terrain, base)), 3, "without a change the mesh comes from the cache")
 
 	ProjectSettings.set_setting(BBTerrain.SETTING_SPACING, 16)
-	eq(_vertex_count(BBTerrain.terrain_mesh(terrain, base)), 17 * 17, "po změně nastavení se peče znovu, po 16 m")
+	eq(_vertex_count(BBTerrain.terrain_mesh(terrain, base)), 17 * 17, "after a settings change it bakes again, every 16 m")
 	ProjectSettings.set_setting(BBTerrain.SETTING_SPACING, 1)
-	eq(_vertex_count(BBTerrain.terrain_mesh(terrain, base)), 257 * 257, "plné rozlišení po 1 m")
+	eq(_vertex_count(BBTerrain.terrain_mesh(terrain, base)), 257 * 257, "full resolution every 1 m")
 	ProjectSettings.set_setting(BBTerrain.SETTING_SPACING, BBTerrain.DEFAULT_SPACING)
 	done()
 

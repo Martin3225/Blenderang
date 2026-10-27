@@ -3,7 +3,7 @@ schema_version = "1.0.0"
 id = "blender_bridge"
 version = "0.1.0"
 name = "Blender Bridge"
-tagline = "Synchronizace rozmistovani objektu s Godot scenou"
+tagline = "Round-trip Godot scenes through Blender"
 maintainer = "JanekRPG"
 type = "add-on"
 
@@ -14,4 +14,4 @@ blender_version_min = "4.2.0"
 license = ["SPDX:GPL-3.0-or-later"]
 
 [permissions]
-files = "Cteni manifestu a linkovani zdrojovych .blend souboru"
+files = "Read scene manifests and link source .blend files"

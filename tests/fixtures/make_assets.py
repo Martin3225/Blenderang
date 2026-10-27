@@ -1,17 +1,17 @@
-"""Vyrobí testovací assety pro Godot fixture projekt.
+"""Makes test assets for the Godot fixture project.
 
-Spouští se z runneru (``run_tests.py --regen-fixtures``) v Blenderu:
+Run from the runner (``run_tests.py --regen-fixtures``) in Blender:
 
-    blender --background --factory-startup --python tests/fixtures/make_assets.py -- <výstupní adresář>
+    blender --background --factory-startup --python tests/fixtures/make_assets.py -- <output folder>
 
-Každý asset je jednoduchý, ale pokrývá jednu cestu importu:
+Each asset is simple but covers one import path:
 
-* ``crate.glb``  — krychle 1 m, počátek ve středu podstavy
-* ``tower.glb``  — válec 2 m, dva meshe v hierarchii
-* ``barrel.fbx`` — válec přes FBX (jiný importér než glTF)
-* ``rig.glb``    — armatura se třemi kostmi a skinovaným meshem; glTF
-  importér k ní vyrábí pomocné objekty (tvary kostí), které se nesmí
-  objevit ve scéně
+* ``crate.glb``  — 1 m cube, origin at the centre of its base
+* ``tower.glb``  — 2 m cylinder, two meshes in a hierarchy
+* ``barrel.fbx`` — cylinder via FBX (a different importer than glTF)
+* ``rig.glb``    — armature with three bones and a skinned mesh; the glTF
+  importer creates helper objects for it (bone shapes) that must not
+  appear in the scene
 """
 
 import os

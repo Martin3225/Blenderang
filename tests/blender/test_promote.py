@@ -1,4 +1,4 @@
-"""Výroba zdrojového .blend z náhledu (.glb → .blend)."""
+"""Making a source .blend from a preview (.glb → .blend)."""
 
 import os
 
@@ -28,7 +28,7 @@ class PromoteTest(BridgeCase):
         self.promote("Crate")
         for name in ("Crate", "InRotated", "Detached"):
             obj = bpy.data.objects[name]
-            self.assertIsNotNone(obj.instance_collection, "%s přišel o geometrii" % name)
+            self.assertIsNotNone(obj.instance_collection, "%s lost its geometry" % name)
             self.assertIsNotNone(obj.instance_collection.library, name)
             self.assertEqual(obj.get(bridge.P_TIER), "library", name)
 
@@ -48,8 +48,8 @@ class PromoteTest(BridgeCase):
         with open(path, "wb") as handle:
             handle.write(b"puvodni")
         self.open_scene()
-        self.assertEqual(bpy.data.objects["Tower"].get(bridge.P_TIER), "none", "poškozený zdroj → náhled")
-        with self.assertRaisesRegex(RuntimeError, "už existuje"):
+        self.assertEqual(bpy.data.objects["Tower"].get(bridge.P_TIER), "none", "broken source → preview")
+        with self.assertRaisesRegex(RuntimeError, "already exists"):
             self.promote("Tower")
         with open(path, "rb") as handle:
             self.assertEqual(handle.read(), b"puvodni")
@@ -58,6 +58,6 @@ class PromoteTest(BridgeCase):
         self.open_scene()
         self.promote("Tower")
         bridge.export(bpy.context.scene)
-        # Manifest nese tier z Blenderu jen jako informaci; Godot si ho při
-        # dalším exportu spočítá sám podle souboru vedle assetu.
+        # The manifest carries the tier from Blender only as information; Godot works
+        # it out itself on the next export from the file next to the asset.
         self.assertTrue(os.path.isfile(os.path.join(harness.ASSETS, "tower.blend")))

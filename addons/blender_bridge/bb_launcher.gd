@@ -2,11 +2,11 @@
 class_name BBLauncher
 extends RefCounted
 
-## Spuštění Blenderu se scénou rovnou postavenou z manifestu.
+## Launches Blender with the scene already built from the manifest.
 ##
-## Cesta k Blenderu se bere z editorového nastavení, které Godot sám používá
-## pro import .blend: [code]Editor Settings ▸ FileSystem ▸ Import ▸ Blender ▸
-## Blender Path[/code]. Na Linuxu může ukazovat i na flatpak wrapper
+## The Blender path comes from the editor setting Godot itself uses for
+## importing .blend: [code]Editor Settings ▸ FileSystem ▸ Import ▸ Blender ▸
+## Blender Path[/code]. On Linux it may also point to the flatpak wrapper
 ## [code]/var/lib/flatpak/exports/bin/org.blender.Blender[/code].
 
 const SETTING_BLENDER_PATH: String = "filesystem/import/blender/blender_path"
@@ -19,13 +19,13 @@ static func blender_path() -> String:
 	return str(settings.get_setting(SETTING_BLENDER_PATH))
 
 
-## Python, který Blender spustí po startu. V GUI se volání odloží časovačem,
-## protože při [code]--python-expr[/code] ještě neexistuje okno a operátor
-## by neměl kontext. V [code]--background[/code] časovače neběží, tam se
-## volá hned.
+## Python that Blender runs after startup. In the GUI the call is deferred with
+## a timer, because during [code]--python-expr[/code] no window exists yet and the
+## operator would have no context. In [code]--background[/code] timers don't
+## run, so it's called right away.
 static func startup_expression(manifest_abs: String) -> String:
-	# JSON řetězec je zároveň platný Python literál, včetně zpětných lomítek
-	# z Windows cest.
+	# A JSON string is also a valid Python literal, including the backslashes
+	# in Windows paths.
 	var literal: String = JSON.stringify(manifest_abs)
 	return "\n".join([
 		"import bpy",
@@ -42,7 +42,7 @@ static func launch(manifest_abs: String) -> Error:
 	var executable: String = blender_path()
 	if executable.is_empty() or not FileAccess.file_exists(executable):
 		push_error(
-			"Blender Bridge: nastav cestu k Blenderu v Editor Settings ▸ FileSystem ▸ Import ▸ Blender ▸ Blender Path (teď: \"%s\")"
+			"Blender Bridge: set the Blender path in Editor Settings ▸ FileSystem ▸ Import ▸ Blender ▸ Blender Path (currently: \"%s\")"
 			% executable
 		)
 		return ERR_FILE_NOT_FOUND

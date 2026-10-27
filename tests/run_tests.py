@@ -1,30 +1,30 @@
 #!/usr/bin/env python3
-"""Testy Blender Bridge.
+"""Blender Bridge tests.
 
-    python tests/run_tests.py                 # všechno
-    python tests/run_tests.py --only godot    # jen jedna sada
+    python tests/run_tests.py                 # everything
+    python tests/run_tests.py --only godot    # a single suite
     python tests/run_tests.py --regen-fixtures
 
-Sady:
+Suites:
 
-* ``godot``  — logika pluginu bez editoru (vlastnictví, manifest, cesty,
-  kontext, zápis zpět do scény)
-* ``blender`` — Blender extension na pozadí (stavba scény, export, výroba
-  zdroje, úprava modelu, převody souřadnic)
-* ``editor`` — skutečný Godot editor bez okna: tlačítko, kontextové menu,
-  automatické načítání změn z Blenderu
-* ``e2e``    — celý cyklus Godot → Blender → Godot přes soubory na disku
-* ``gui``    — Blender s oknem na virtuálním displeji (Xvfb): start z Godotu,
-  panel, zaměření pohledu, úprava modelu; na Windows a bez Xvfb se přeskočí
+* ``godot``  — plugin logic without the editor (ownership, manifest, paths,
+  context, writing back to the scene)
+* ``blender`` — Blender extension in the background (scene build, export, making
+  sources, model editing, coordinate conversions)
+* ``editor`` — a real headless Godot editor: toolbar button, context menu,
+  automatic loading of changes from Blender
+* ``e2e``    — the whole Godot → Blender → Godot cycle through files on disk
+* ``gui``    — Blender with a window on a virtual display (Xvfb): start from Godot,
+  panel, view framing, model editing; skipped on Windows and without Xvfb
 
-Pracuje výhradně v ``tests/.work``: fixtures se zkopírují, addon se doplní
-z repa, Godot dostane vlastní konfigurační adresář (nesahá na tvoje
-editor settings) a Blender běží s ``--factory-startup`` (bez tvých addonů).
+Works only inside ``tests/.work``: fixtures are copied, the add-on is added
+from the repo, Godot gets its own config folder (it doesn't touch your
+editor settings) and Blender runs with ``--factory-startup`` (without your add-ons).
 
-Cesty k programům: ``--godot`` / ``$GODOT``, ``--blender`` / ``$BLENDER``,
-jinak se hledají na PATH a ve standardních umístěních. Terrain3D se bere
-z ``--terrain3d`` / ``$TERRAIN3D`` (adresář ``addons/terrain_3d``), jinak se
-stáhne zafixovaná verze do ``tests/.cache``.
+Program paths: ``--godot`` / ``$GODOT``, ``--blender`` / ``$BLENDER``,
+otherwise they're searched for on PATH and in standard locations. Terrain3D comes
+from ``--terrain3d`` / ``$TERRAIN3D`` (the ``addons/terrain_3d`` folder), otherwise
+a pinned version is downloaded to ``tests/.cache``.
 """
 
 from __future__ import annotations
@@ -60,14 +60,14 @@ SUITES = ("godot", "blender", "editor", "e2e", "gui")
 WINDOWS = platform.system() == "Windows"
 
 
-# ------------------------------------------------------------------ programy
+# ------------------------------------------------------------------ programs
 
 
 def find_godot(explicit: str | None) -> str:
     for candidate in (explicit, os.environ.get("GODOT"), shutil.which("godot"), shutil.which("godot4")):
         if candidate and Path(candidate).exists():
             return candidate
-    sys.exit("Godot nenalezen: použij --godot nebo $GODOT")
+    sys.exit("Godot not found: use --godot or $GODOT")
 
 
 def find_blender(explicit: str | None) -> str:
@@ -85,7 +85,7 @@ def find_blender(explicit: str | None) -> str:
     for candidate in candidates:
         if candidate and Path(candidate).exists():
             return candidate
-    sys.exit("Blender nenalezen: použij --blender nebo $BLENDER")
+    sys.exit("Blender not found: use --blender or $BLENDER")
 
 
 def find_terrain3d(explicit: str | None) -> Path | None:
@@ -94,7 +94,7 @@ def find_terrain3d(explicit: str | None) -> Path | None:
             path = Path(candidate)
             if (path / "plugin.cfg").exists():
                 return path
-            sys.exit(f"{path} není adresář addons/terrain_3d")
+            sys.exit(f"{path} is not an addons/terrain_3d folder")
     target = CACHE / TERRAIN3D_VERSION / "addons" / "terrain_3d"
     if (target / "plugin.cfg").exists():
         return target
@@ -114,12 +114,12 @@ def find_terrain3d(explicit: str | None) -> Path | None:
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes(bundle.read(member))
     except OSError as error:
-        print(f"! Terrain3D se nepodařilo získat ({error}); testy terénu se přeskočí")
+        print(f"! Could not get Terrain3D ({error}); terrain tests will be skipped")
         return None
     return target if (target / "plugin.cfg").exists() else None
 
 
-# ------------------------------------------------------------------- běhy
+# ---------------------------------------------------------------------- runs
 
 
 class Tools:
@@ -129,8 +129,8 @@ class Tools:
         self.terrain3d = terrain3d
 
     def godot_env(self, extra: dict[str, str] | None = None) -> dict[str, str]:
-        """Godot s vlastním domovem: editor settings, logy ani cache se
-        nemíchají s tvým Godotem."""
+        """Godot with its own home: editor settings, logs and cache don't
+        mix with your Godot."""
         env = dict(os.environ)
         if WINDOWS:
             env["APPDATA"] = str(HOME / "appdata")
@@ -153,7 +153,7 @@ class Tools:
             output = result.stdout
         except subprocess.TimeoutExpired as expired:
             output = (expired.stdout or "") if isinstance(expired.stdout, str) else ""
-            output += f"\n!!! TIMEOUT po {timeout} s"
+            output += f"\n!!! TIMEOUT after {timeout} s"
             result = subprocess.CompletedProcess(command, 124, output)
         (LOGS / f"{name}.log").write_text(
             f"$ {' '.join(command)}\n({time.monotonic() - started:.1f} s, kód {result.returncode})\n\n{output}",
@@ -171,8 +171,8 @@ class Tools:
 
     @staticmethod
     def blender_env(extra: dict[str, str] | None = None) -> dict[str, str]:
-        """Blender s vlastním uživatelským adresářem: konfigurace ani odkaz na
-        rozpracovanou úpravu se nemíchají s tvým Blenderem."""
+        """Blender with its own user folder: config and the pointer to an edit in
+        progress don't mix with your Blender."""
         env = dict(os.environ)
         env["BLENDER_USER_RESOURCES"] = str(HOME / "blender")
         env.update(extra or {})
@@ -183,7 +183,7 @@ class Tools:
         return self.run(name, command, timeout, self.blender_env())
 
 
-# ------------------------------------------------------------- příprava
+# ------------------------------------------------------------------- setup
 
 
 def prepare(tools: Tools) -> None:
@@ -206,12 +206,12 @@ def prepare(tools: Tools) -> None:
         timeout=600, env=tools.godot_env(),
     )
     if result.returncode != 0:
-        sys.exit(f"Import testovacího projektu selhal, viz {LOGS / 'import.log'}")
+        sys.exit(f"Importing the test project failed, see {LOGS / 'import.log'}")
 
 
 def reset_fixtures() -> None:
-    """Každá sada začíná s nedotčenými scénami a assety; .godot (importy)
-    zůstává, assety se nemění."""
+    """Each suite starts with untouched scenes and assets; .godot (imports)
+    stays, assets don't change."""
     shutil.copytree(TESTS / "godot" / "fixtures", PROJECT / "fixtures", dirs_exist_ok=True)
     for leftover in (PROJECT / "fixtures").rglob("*"):
         if leftover.suffix in (".blend", ".blend1", ".bbsrc"):
@@ -230,7 +230,7 @@ def _link_or_copy(source: Path, target: Path) -> None:
 
 
 def fake_blender() -> Path:
-    """Místo Blenderu zapíše argumenty, se kterými ho Godot spustil."""
+    """Instead of Blender, records the arguments Godot launched it with."""
     record = OUT / "fake_blender_args.txt"
     if WINDOWS:
         script = WORK / "fake_blender.bat"
@@ -242,12 +242,12 @@ def fake_blender() -> Path:
     return script
 
 
-# ------------------------------------------------------------------ sady
+# ------------------------------------------------------------------ suites
 
 
 def results_from(path: Path, suite: str, log: str) -> list[dict]:
     if not path.exists():
-        return [{"suite": suite, "name": "(sada nedoběhla)", "status": "fail", "message": f"viz {LOGS / log}"}]
+        return [{"suite": suite, "name": "(suite did not finish)", "status": "fail", "message": f"see {LOGS / log}"}]
     data = json.loads(path.read_text(encoding="utf-8"))
     for item in data:
         item.setdefault("suite", suite)
@@ -282,7 +282,7 @@ def suite_editor(tools: Tools) -> list[dict]:
     )
     for phase, scene in phases:
         if phase == "restart":
-            # Simulace práce v Blenderu, zatímco Godot neběžel.
+            # Simulates work in Blender while Godot wasn't running.
             _move_in_manifest(PROJECT / ".pipeline" / "basic.json", "Crate", (9.0, 0.0, 3.0))
         out = OUT / f"editor_{phase}.json"
         tools.godot_editor(f"editor_{phase}", f"res://fixtures/scenes/{scene}.tscn",
@@ -319,13 +319,13 @@ def _free_display() -> int:
     for number in range(97, 140):
         if not Path(f"/tmp/.X11-unix/X{number}").exists() and not Path(f"/tmp/.X{number}-lock").exists():
             return number
-    raise RuntimeError("žádný volný X display")
+    raise RuntimeError("no free X display")
 
 
 def suite_gui(tools: Tools) -> list[dict]:
     if WINDOWS or shutil.which("Xvfb") is None:
         return [{"suite": "gui", "name": "Blender s oknem", "status": "skip",
-                 "message": "potřebuje Xvfb (Linux)"}]
+                 "message": "needs Xvfb (Linux)"}]
     export_manifests(tools)
     expression = (PROJECT / ".pipeline" / "startup_expr.py").read_text(encoding="utf-8")
     display = _free_display()
@@ -360,8 +360,8 @@ def regen_fixtures(tools: Tools) -> None:
     prepare(tools)
     result = tools.godot_script("generate", "res://fixtures/generate.gd", [])
     if "FIXTURES_OK" not in result.stdout:
-        sys.exit(f"Generování scén selhalo, viz {LOGS / 'generate.log'}")
-    # Zpátky do repa jdou scény, data terénu a .import soubory (stabilní uid).
+        sys.exit(f"Generating scenes failed, see {LOGS / 'generate.log'}")
+    # Scenes, terrain data and .import files (stable uids) go back to the repo.
     for relative in ("fixtures/scenes", "fixtures/terrain_data"):
         source = PROJECT / relative
         target = TESTS / "godot" / relative
@@ -371,7 +371,7 @@ def regen_fixtures(tools: Tools) -> None:
             shutil.copytree(source, target)
     for imported in (PROJECT / "fixtures" / "assets").glob("*.import"):
         shutil.copy2(imported, assets / imported.name)
-    print("Fixtures přegenerovány.")
+    print("Fixtures regenerated.")
 
 
 # ------------------------------------------------------------------ main
@@ -390,7 +390,7 @@ def report(results: list[dict]) -> int:
     passed = sum(r["status"] == "pass" for r in results)
     failed = sum(r["status"] == "fail" for r in results)
     skipped = sum(r["status"] == "skip" for r in results)
-    print(f"\n{passed} ok, {failed} selhání, {skipped} přeskočeno  (logy: {LOGS})")
+    print(f"\n{passed} ok, {failed} failed, {skipped} skipped  (logs: {LOGS})")
     return 1 if failed else 0
 
 
@@ -414,8 +414,8 @@ def main() -> int:
         reset_fixtures()
         results += RUNNERS[suite](tools)
     if tools.terrain3d is None:
-        results.append({"suite": "prostředí", "name": "Terrain3D", "status": "skip",
-                        "message": "nedostupný, testy terénu neběžely"})
+        results.append({"suite": "environment", "name": "Terrain3D", "status": "skip",
+                        "message": "unavailable, terrain tests did not run"})
     (OUT / "results.json").write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
     return report(results)
 

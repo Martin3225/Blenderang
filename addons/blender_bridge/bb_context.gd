@@ -2,34 +2,34 @@
 class_name BBContext
 extends RefCounted
 
-## Skutečná geometrie všeho, co vlastní Godot (hráč, postavy, terén, …), jako
-## jeden [code].glb[/code] vedle manifestu. Blender ho naimportuje jako
-## zamčený kontext — místo prázdných obálek je vidět, co ve scéně opravdu je.
+## Real geometry of everything Godot owns (player, characters, terrain, …) as
+## a single [code].glb[/code] next to the manifest. Blender imports it as
+## locked context, so instead of empty bounding boxes you see what's really in the scene.
 ##
-## Obsahuje jen meshe a jejich materiály. Skripty, kolize, světla ani
-## MultiMesh (tráva, stromy z ProtonScatteru) se nepřenáší.
+## Contains only meshes and their materials. Scripts, collisions, lights and
+## MultiMesh (grass, trees from ProtonScatter) are not transferred.
 
-## Terrain3D se peče do meshe s upečenou barvou, viz BBTerrain.
+## Terrain3D is baked into a mesh with a baked colour, see BBTerrain.
 
 
 static func path_for(manifest_path: String) -> String:
 	return manifest_path.get_basename() + ".context.glb"
 
 
-## Postaví dočasný strom s kopiemi meshů a uloží ho jako glTF. Vrací cestu,
-## nebo prázdný řetězec, když není co exportovat nebo export selže — Blender
-## pak místo geometrie použije obálky z manifestu.
+## Builds a temporary tree with copies of the meshes and saves it as glTF. Returns
+## the path, or an empty string when there's nothing to export or the export fails;
+## Blender then uses the bounding boxes from the manifest instead of geometry.
 static func write(root: Node, manifest: Dictionary, manifest_path: String) -> String:
 	var tree: Node3D = _build(root, manifest, manifest_path.get_basename())
 	var path: String = path_for(manifest_path)
 	if FileAccess.file_exists(path):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 	if tree.find_children("*", "MeshInstance3D", true, false).is_empty():
-		# glTF bez jediného meshe má prázdný buffer a Blender ho odmítne načíst.
+		# A glTF without a single mesh has an empty buffer and Blender refuses to load it.
 		tree.free()
 		return ""
-	# V editoru glTF export přeskakuje nody bez ownera (jako při ukládání
-	# scény). Mimo editor ne — proto to headless testy dlouho nechytily.
+	# In the editor, glTF export skips nodes without an owner (like when saving
+	# a scene). Outside the editor it doesn't, which is why headless tests missed it for a long time.
 	for node: Node in tree.find_children("*", "", true, false):
 		node.owner = tree
 	var document: GLTFDocument = GLTFDocument.new()
@@ -39,7 +39,7 @@ static func write(root: Node, manifest: Dictionary, manifest_path: String) -> St
 		err = document.write_to_filesystem(state, ProjectSettings.globalize_path(path))
 	tree.free()
 	if err != OK:
-		push_error("Blender Bridge: kontext scény se nepodařilo zapsat (%d)" % err)
+		push_error("Blender Bridge: could not write the scene context (%d)" % err)
 		return ""
 	return path
 
@@ -62,7 +62,7 @@ static func _build(root: Node, manifest: Dictionary, cache_base: String) -> Node
 			_add_terrain(node, unit, cache_base)
 		else:
 			_add_meshes(node, unit, root, units)
-		# Readable unique name: dva „StaticBody3D“ z různých rodičů vedle sebe.
+		# Readable unique name: two "StaticBody3D" from different parents side by side.
 		tree.add_child(unit, true)
 	return tree
 
@@ -74,7 +74,7 @@ static func _add_terrain(terrain: Node3D, unit: Node3D, cache_base: String) -> v
 	var instance: MeshInstance3D = MeshInstance3D.new()
 	instance.name = "TerrainMesh"
 	instance.mesh = mesh
-	# Terrain3D peče ve světových souřadnicích; vyrovná se transformace jednotky.
+	# Terrain3D bakes in world coordinates; cancel out the unit's transform.
 	instance.transform = unit.transform.affine_inverse()
 	unit.add_child(instance)
 
@@ -100,10 +100,10 @@ static func _add_meshes(node: Node3D, unit: Node3D, root: Node, units: Dictionar
 		unit.add_child(copy, true)
 
 
-## Co do geometrie jednotky nepatří:
-## - objekty, které vlastní Blender (přijdou do Blenderu zvlášť),
-## - jiné jednotky kontextu (mají vlastní záznam, jinak by byly dvakrát),
-## - interní nody pluginů bez ownera, např. MouseQuad uvnitř Terrain3D.
+## What doesn't belong in a unit's geometry:
+## - objects owned by Blender (they go to Blender separately),
+## - other context units (they have their own entry, otherwise they'd appear twice),
+## - internal plugin nodes without an owner, e.g. MouseQuad inside Terrain3D.
 static func _skip(node: Node, root: Node, units: Dictionary) -> bool:
 	if BBOwnership.is_blender_owned(node) or units.has(node):
 		return true

@@ -1,8 +1,8 @@
-"""Společný základ Blender testů.
+"""Common base for the Blender tests.
 
-Každý test začíná v prázdném Blenderu s nedotčeným manifestem a assety;
-cokoli, co test v pracovním projektu vytvoří (.blend zdroje, přegenerované
-.glb, značka rozpracované úpravy), se po něm vrátí.
+Each test starts in an empty Blender with an untouched manifest and assets;
+anything the test creates in the working project (.blend sources, regenerated
+.glb, the edit-in-progress marker) is reverted after it.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ def configure(project: str) -> None:
 
 
 def godot_to_blender_point(x: float, y: float, z: float) -> Vector:
-    """Godot (Y nahoru, -Z dopředu) → Blender (Z nahoru)."""
+    """Godot (Y up, -Z forward) → Blender (Z up)."""
     return Vector((x, -z, y))
 
 
@@ -51,7 +51,7 @@ class BridgeCase(unittest.TestCase):
         self._restore()
 
     def _restore(self) -> None:
-        # Manifesty i geometrie kontextu, jak je vyexportoval Godot.
+        # Manifests and context geometry as Godot exported them.
         for name in os.listdir(_PRISTINE_PIPELINE):
             source = os.path.join(_PRISTINE_PIPELINE, name)
             if os.path.isfile(source):
@@ -70,7 +70,7 @@ class BridgeCase(unittest.TestCase):
         for name in os.listdir(_PRISTINE_ASSETS):
             shutil.copyfile(os.path.join(_PRISTINE_ASSETS, name), os.path.join(ASSETS, name))
 
-    # -------------------------------------------------------------- pomůcky
+    # ------------------------------------------------------------------ helpers
 
     def manifest_path(self, scene: str = "basic") -> str:
         return os.path.join(PIPELINE, scene + ".json")

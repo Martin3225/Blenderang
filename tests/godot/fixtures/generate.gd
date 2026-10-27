@@ -1,23 +1,23 @@
 extends SceneTree
 
-## Vygeneruje testovací scény. Spouští runner přes --regen-fixtures; výsledek
-## se commituje, aby testy běžely nad stabilním vstupem.
+## Generates the test scenes. The runner runs it via --regen-fixtures; the result
+## is committed so tests run on stable input.
 ##
-## basic.tscn — všechny případy rozmístění:
-##   Props/Crate, Props/Tower, Props/Barrel  art instance v kontejneru (označí se)
-##   Rotated (otočený a zvětšený rodič)
-##     InRotated   instance pod transformovaným rodičem (označí se)
-##     Detached    instance s top_level (označí se, transformace je globální)
-##   Player        instance .tscn — gameplay, NEoznačí se
-##   Building      StaticBody3D s meshem, kolizí a vnořenou Decoration
-##                 (vnořená instance pod tělesem se NEoznačí)
-##   Character     riggovaný .glb (označí se)
-##     Helmet      art instance jako dítě modelu (výstroj na armatuře; označí se)
-##     Socket      Marker3D pod modelem — kontext
-##   Spawn, Sun    Marker3D a světlo — jen kontext
-##   Logic/Floating  Node3D pod obyčejným Node — kontext s meshem
-## second.tscn — malá druhá scéna pro otevírání z kontextového menu
-## terrain.tscn — Terrain3D pod posunutým NavigationRegion3D (top_level)
+## basic.tscn — all layout cases:
+##   Props/Crate, Props/Tower, Props/Barrel  art instances in a container (marked)
+##   Rotated (rotated and scaled parent)
+##     InRotated   instance under a transformed parent (marked)
+##     Detached    instance with top_level (marked, transform is global)
+##   Player        .tscn instance — gameplay, NOT marked
+##   Building      StaticBody3D with a mesh, collision and nested Decoration
+##                 (a nested instance under a body is NOT marked)
+##   Character     rigged .glb (marked)
+##     Helmet      art instance as a child of the model (gear on an armature; marked)
+##     Socket      Marker3D under the model — context
+##   Spawn, Sun    Marker3D and a light — context only
+##   Logic/Floating  Node3D under a plain Node — context with a mesh
+## second.tscn — a small second scene for opening from the context menu
+## terrain.tscn — Terrain3D under an offset NavigationRegion3D (top_level)
 
 const ASSETS: String = "res://fixtures/assets/"
 const SCENES: String = "res://fixtures/scenes/"
@@ -45,7 +45,7 @@ func _save(root: Node, path: String) -> void:
 	if err == OK:
 		err = ResourceSaver.save(packed, path)
 	if err != OK:
-		push_error("nelze uložit %s (%d)" % [path, err])
+		push_error("cannot save %s (%d)" % [path, err])
 	if root.is_inside_tree():
 		root.get_parent().remove_child(root)
 	root.free()
@@ -112,7 +112,7 @@ func _basic() -> Node:
 	_instance(building, root, "crate.glb", "Decoration", Vector3(0, 3, 0))
 
 	var character: Node3D = _instance(root, root, "rig.glb", "Character", Vector3(5, 0, -2))
-	# Jako výstroj na armature_f: art instance přidané ve scéně jako děti modelu.
+	# Like gear on armature_f: art instances added in the scene as children of the model.
 	_instance(character, root, "crate.glb", "Helmet", Vector3(0, 1.8, 0))
 	var socket: Marker3D = _add(character, Marker3D.new(), root, "Socket")
 	socket.position = Vector3(0, 1, 0)
@@ -137,8 +137,8 @@ func _second() -> Node:
 	return root
 
 
-## Tři jednobarevné textury a auto shader: tráva (0) na rovině, skála (1)
-## ve svahu. Barvy jsou čisté, aby šly v testu upečené mapy poznat.
+## Three single-colour textures and an auto shader: grass (0) on flat ground, rock (1)
+## on slopes. The colours are pure so they can be recognised in the baked map test.
 func _terrain_look(terrain: Node3D) -> void:
 	var assets: Object = ClassDB.instantiate("Terrain3DAssets")
 	var colors: Array[Color] = [Color(0.2, 0.6, 0.2), Color(0.5, 0.5, 0.5), Color(0.8, 0.7, 0.4)]
@@ -152,7 +152,7 @@ func _terrain_look(terrain: Node3D) -> void:
 		texture_asset.call("set_albedo_texture", ImageTexture.create_from_image(image))
 		assets.call("set_texture", id, texture_asset)
 	terrain.set("assets", assets)
-	# Parametry shaderu jdou nastavit, až když materiál patří terénu.
+	# Shader parameters can only be set once the material belongs to the terrain.
 	var material: Object = terrain.get("material")
 	material.call("set_auto_shader", true)
 	material.call("set_shader_param", "auto_base_texture", 1)
@@ -161,8 +161,8 @@ func _terrain_look(terrain: Node3D) -> void:
 	material.call("set_shader_param", "auto_height_reduction", 0.0)
 
 
-## Jeden region 256 m s kopcem uprostřed, pod NavigationRegion3D posunutým
-## o (100, 5, 100). Terrain3D je top_level, takže posun rodiče ho nesmí ovlivnit.
+## One 256 m region with a hill in the middle, under a NavigationRegion3D offset
+## by (100, 5, 100). Terrain3D is top_level, so the parent's offset must not affect it.
 func _terrain() -> Node3D:
 	var root: Node3D = Node3D.new()
 	root.name = "TerrainScene"
@@ -175,14 +175,14 @@ func _terrain() -> Node3D:
 	get_root().add_child(root)
 	await process_frame
 	await process_frame
-	# Jako v reálném projektu: terén v počátku, i když rodič je posunutý.
+	# As in a real project: terrain at the origin, even though the parent is offset.
 	terrain.global_transform = Transform3D.IDENTITY
 
 	_terrain_look(terrain)
 	var data: Object = terrain.call("get_data")
 	data.call("add_region_blankp", Vector3(1, 0, 1), true)
-	# Malování: všude písek (id 2), kvadrant x≥128, z<128 auto shader
-	# (tráva na rovině, skála ve svahu), roh x<32, z<32 obarvený do červena.
+	# Painting: sand everywhere (id 2), quadrant x≥128, z<128 auto shader
+	# (grass on flat ground, rock on slopes), corner x<32, z<32 tinted red.
 	for x: int in 256:
 		for z: int in 256:
 			var position: Vector3 = Vector3(x, 0, z)

@@ -1,9 +1,9 @@
-"""Spustí Blender testy (test_*.py) a zapíše výsledky do JSON.
+"""Runs the Blender tests (test_*.py) and writes the results to JSON.
 
     blender --background --factory-startup --python tests/blender/run.py -- \
-        --repo <repo> --project <pracovní projekt> --out <výsledky.json>
+        --repo <repo> --project <working project> --out <results.json>
 
-Addon se registruje přímo ze zdrojáků v repu, ne z nainstalované kopie.
+The add-on is registered straight from the sources in the repo, not from an installed copy.
 """
 
 import json
@@ -48,7 +48,7 @@ try:
     suite.run(Collect())
 except Exception:
     traceback.print_exc()
-    results.append({"name": "(načtení addonu)", "status": "fail", "message": traceback.format_exc(limit=1)})
+    results.append({"name": "(loading the add-on)", "status": "fail", "message": traceback.format_exc(limit=1)})
 
 with open(options["--out"], "w", encoding="utf-8") as handle:
     json.dump(results, handle, indent=2, ensure_ascii=False)
