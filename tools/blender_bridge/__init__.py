@@ -15,7 +15,7 @@ import os
 
 import bpy
 from bpy.app.handlers import persistent
-from bpy.props import StringProperty
+from bpy.props import BoolProperty, EnumProperty, StringProperty
 from bpy_extras.io_utils import ImportHelper
 
 from . import bridge
@@ -296,6 +296,104 @@ class BB_OT_return_to_scene(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class BB_OT_export_now(bpy.types.Operator):
+    """Přegeneruje .glb hned, bez ukládání .blend"""
+
+    bl_idname = "bb.export_now"
+    bl_label = "Exportovat teď"
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context) -> bool:
+        session = bridge.edit_session()
+        return session is not None and bridge.collection_has_exporter(session)
+
+    def execute(self, context: bpy.types.Context) -> set[str]:
+        session = bridge.edit_session()
+        bridge.export_collection(bridge.session_collection(session))
+        self.report({"INFO"}, "Vyexportováno: %s" % session["asset"])
+        return {"FINISHED"}
+
+
+class BB_OT_reset_export(bpy.types.Operator):
+    """Nastaví export modelu podle výchozích voleb z předvoleb addonu"""
+
+    bl_idname = "bb.reset_export"
+    bl_label = "Výchozí nastavení"
+    bl_options = {"UNDO"}
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context) -> bool:
+        session = bridge.edit_session()
+        return session is not None and bridge.collection_has_exporter(session)
+
+    def execute(self, context: bpy.types.Context) -> set[str]:
+        session = bridge.edit_session()
+        bridge.apply_export_settings(bridge.session_collection(session), bridge.export_defaults())
+        return {"FINISHED"}
+
+
+# Popisky voleb exportu v panelu a předvolbách (pořadí = pořadí v UI).
+EXPORT_LABELS = (
+    ("export_apply", "Aplikovat modifikátory"),
+    ("export_yup", "Osa Y nahoru"),
+    ("export_materials", "Materiály"),
+    ("export_image_format", "Textury"),
+    ("export_animations", "Animace"),
+    ("export_skins", "Skinning"),
+    ("export_morph", "Shape keys"),
+    ("export_tangents", "Tangenty"),
+    ("export_extras", "Custom properties"),
+    ("export_draco_mesh_compression_enable", "Draco komprese"),
+)
+
+
+def _draw_export_options(layout: bpy.types.UILayout, data: object) -> None:
+    column = layout.column(align=True)
+    for key, label in EXPORT_LABELS:
+        if hasattr(data, key):
+            column.prop(data, key, text=label)
+
+
+class BB_Preferences(bpy.types.AddonPreferences):
+    bl_idname = __package__
+
+    export_apply: BoolProperty(
+        name="Aplikovat modifikátory", default=True,
+        description="Do .glb jde geometrie po modifikátorech (kromě armatury), jak je vidět ve viewportu",
+    )
+    export_yup: BoolProperty(name="Osa Y nahoru", default=True)
+    export_materials: EnumProperty(
+        name="Materiály", default="EXPORT",
+        items=(
+            ("EXPORT", "Exportovat", "Materiály i s texturami"),
+            ("PLACEHOLDER", "Zástupné", "Jen sloty materiálů, bez dat"),
+            ("NONE", "Žádné", "Bez materiálů"),
+        ),
+    )
+    export_image_format: EnumProperty(
+        name="Textury", default="AUTO",
+        items=(
+            ("AUTO", "Automaticky", "PNG, nebo JPEG pokud je zdroj JPEG"),
+            ("JPEG", "JPEG", "Menší, ztrátové"),
+            ("WEBP", "WebP", "Menší, Godot je umí"),
+            ("NONE", "Žádné", "Textury se nevyexportují"),
+        ),
+    )
+    export_animations: BoolProperty(name="Animace", default=True)
+    export_skins: BoolProperty(name="Skinning", default=True)
+    export_morph: BoolProperty(name="Shape keys", default=True)
+    export_tangents: BoolProperty(name="Tangenty", default=False)
+    export_extras: BoolProperty(name="Custom properties", default=False)
+    export_draco_mesh_compression_enable: BoolProperty(name="Draco komprese", default=False)
+
+    def draw(self, context: bpy.types.Context) -> None:
+        layout = self.layout
+        layout.label(text="Výchozí export zdrojů do .glb", icon="EXPORT")
+        layout.label(text="Platí pro nové zdroje a pro zdroje, které ještě vlastní nastavení nemají.")
+        layout.label(text="Konkrétní model se nastavuje v panelu Bridge při jeho úpravě.")
+        _draw_export_options(layout, self)
+
+
 # --------------------------------------------------------------- handlery
 
 
@@ -409,6 +507,18 @@ class BB_PT_panel(bpy.types.Panel):
         column.label(text="Export: %s" % session["asset"].replace("res://", "", 1))
         column.label(text="Okolí ze scény je jen pro orientaci a neukládá se.")
 
+        collection = bridge.session_collection(session)
+        exporter = bridge.gltf_exporter(collection) if collection is not None else None
+        if exporter is None:
+            return
+        box = layout.box()
+        box.label(text="Nastavení exportu", icon="SETTINGS")
+        _draw_export_options(box, exporter.export_properties)
+        row = box.row(align=True)
+        row.operator(BB_OT_export_now.bl_idname, icon="EXPORT")
+        row.operator(BB_OT_reset_export.bl_idname, icon="LOOP_BACK")
+        box.label(text="Uloží se s modelem; ostatní volby v Kolekce › Exporters.", icon="INFO")
+
 
 class BB_PT_detail(bpy.types.Panel):
     """Podrobnosti o vybraném objektu: odkud je a co se s ním stane."""
@@ -470,6 +580,9 @@ _CLASSES = (
     BB_OT_clear_source,
     BB_OT_select_model,
     BB_OT_return_to_scene,
+    BB_OT_export_now,
+    BB_OT_reset_export,
+    BB_Preferences,
     BB_PT_panel,
     BB_PT_detail,
 )

@@ -582,21 +582,82 @@ def asset_abs(root: str, asset_src: str) -> str:
     return os.path.join(root, asset_src.replace("res://", "", 1))
 
 
+# Volby glTF exportu, které addon nastavuje a ukazuje v panelu. Výchozí
+# hodnoty platí pro nové zdroje; uživatel je mění v předvolbách addonu.
+EXPORT_DEFAULTS: dict[str, Any] = {
+    "export_apply": True,
+    "export_yup": True,
+    "export_materials": "EXPORT",
+    "export_image_format": "AUTO",
+    "export_animations": True,
+    "export_skins": True,
+    "export_morph": True,
+    "export_tangents": False,
+    "export_extras": False,
+    "export_draco_mesh_compression_enable": False,
+}
+
+# Kolekce, na kterou už výchozí nastavení exportu jednou použité bylo. Pak
+# platí to, co má zdroj uložené u sebe, a předvolby ho nepřepisují.
+C_EXPORT_SET = "bb_export_set"
+
+
+def export_defaults() -> dict[str, Any]:
+    """Výchozí volby exportu z předvoleb addonu (bez nich vestavěné)."""
+    defaults = dict(EXPORT_DEFAULTS)
+    addon = bpy.context.preferences.addons.get(__package__ or "")
+    if addon is not None:
+        for key in defaults:
+            if hasattr(addon.preferences, key):
+                defaults[key] = getattr(addon.preferences, key)
+    return defaults
+
+
+def gltf_exporter(collection: bpy.types.Collection) -> bpy.types.CollectionExport | None:
+    exporter = next((e for e in collection.exporters if e.name.lower().startswith("gltf")), None)
+    if exporter is None and len(collection.exporters):
+        exporter = collection.exporters[0]
+    return exporter
+
+
+def apply_export_settings(collection: bpy.types.Collection, settings: dict[str, Any]) -> None:
+    """Zapíše volby do exporteru kolekce; ty se uloží se zdrojovým .blend."""
+    exporter = gltf_exporter(collection)
+    if exporter is None:
+        return
+    props = exporter.export_properties
+    for key, value in settings.items():
+        if not hasattr(props, key):
+            continue   # jiná verze glTF addonu
+        try:
+            setattr(props, key, value)
+        except (TypeError, ValueError):
+            warn("export: volba %s=%r nejde nastavit" % (key, value))
+    collection[C_EXPORT_SET] = True
+
+
 def ensure_exporter(collection: bpy.types.Collection, target: str) -> None:
     """Collection Exporter na glTF do cesty assetu.
 
     Cesta se nastavuje vždy znovu: ``bpy.data.libraries.write`` ji do nového
     souboru neuloží a prázdná cesta by exportovala jinam (podle jména kolekce).
+
+    Výchozí volby (hlavně aplikace modifikátorů) dostane kolekce jen jednou —
+    nový zdroj i starší zdroj, který je ještě nemá. Další změny v panelu
+    zůstanou ve zdroji.
     """
-    exporter = next((e for e in collection.exporters if e.name.lower().startswith("gltf")), None)
-    if exporter is None and len(collection.exporters):
-        exporter = collection.exporters[0]
+    exporter = gltf_exporter(collection)
     if exporter is None:
         with bpy.context.temp_override(collection=collection):
             bpy.ops.collection.exporter_add(name="IO_FH_gltf2")
         exporter = collection.exporters[-1]
     exporter.filepath = target
-    exporter.export_properties.filepath = target
+    props = exporter.export_properties
+    props.filepath = target
+    if hasattr(props, "export_format"):
+        props.export_format = "GLTF_SEPARATE" if target.lower().endswith(".gltf") else "GLB"
+    if not collection.get(C_EXPORT_SET):
+        apply_export_settings(collection, export_defaults())
 
 
 def export_collection(collection: bpy.types.Collection) -> None:

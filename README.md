@@ -200,6 +200,26 @@ nepřepíše.
 Kontext se před každým uložením odebere a po něm vrátí, do zdrojového souboru
 se nikdy nezapíše.
 
+#### Nastavení exportu
+
+Export do `.glb` ve výchozím stavu **aplikuje modifikátory** (kromě armatury),
+takže v Godotu je stejná geometrie jako ve viewportu. Při úpravě modelu je
+v panelu Bridge box **Nastavení exportu**: aplikovat modifikátory, osa Y
+nahoru, materiály, formát textur, animace, skinning, shape keys, tangenty,
+custom properties a Draco komprese. Nastavení se ukládá do zdrojového `.blend`
+(je to Collection Exporter kolekce, ostatní volby glTF jsou v
+*Vlastnosti kolekce › Exporters*). **Exportovat teď** přegeneruje `.glb` bez
+uložení, **Výchozí nastavení** vrátí volby z předvoleb.
+
+Výchozí volby pro nové zdroje se mění v *Předvolby › Add-ons › Blender
+Bridge*. Dostane je i starší zdroj, který si nastavení ještě nepamatuje (pozná
+se podle vlastnosti `bb_export_set` na kolekci) — jednou, při prvním otevření
+přes **Upravit**; potom už platí jen to, co je uložené ve zdroji.
+
+> glTF exportér při aplikaci modifikátorů zahodí shape keys meshe, který
+> nějaký (jiný než armaturu) má. Pokud je model potřebuje, vypni u něj
+> „Aplikovat modifikátory“, nebo modifikátory aplikuj ručně.
+
 **Uložit a zpět do scény** postaví scénu znovu z manifestu, už s novým modelem.
 
 ---

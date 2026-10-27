@@ -1,7 +1,9 @@
 """Úprava modelu v jeho .blend s kontextem ze scény."""
 
+import json
 import os
 import shutil
+import struct
 import time
 
 import bpy
@@ -98,6 +100,56 @@ class EditTest(BridgeCase):
         self.assertEqual(len(exporters), 1)
         self.assertTrue(bridge._same_file(bpy.path.abspath(exporters[0].export_properties.filepath),
                                           os.path.join(harness.ASSETS, "tower.glb")))
+
+    def test_new_source_applies_modifiers_by_default(self):
+        self.start_edit()
+        props = bridge.gltf_exporter(bpy.data.collections["tower"]).export_properties
+        self.assertTrue(props.export_apply)
+        self.assertEqual(props.export_format, "GLB")
+
+    def test_apply_modifiers_toggle_changes_exported_geometry(self):
+        self.start_edit()
+        collection = bpy.data.collections["tower"]
+        mesh = next(o for o in collection.all_objects if o.type == "MESH")
+        array = mesh.modifiers.new("Array", "ARRAY")
+        array.count = 3
+        props = bridge.gltf_exporter(collection).export_properties
+        glb = os.path.join(harness.ASSETS, "tower.glb")
+
+        props.export_apply = False
+        bpy.ops.wm.save_mainfile()
+        plain = glb_vertex_count(glb)
+        props.export_apply = True
+        bpy.ops.wm.save_mainfile()
+        self.assertGreater(glb_vertex_count(glb), plain, "pole z modifikátoru chybí v .glb")
+
+    def test_older_source_gets_defaults_once(self):
+        self.start_edit()
+        collection = bpy.data.collections["tower"]
+        del collection[bridge.C_EXPORT_SET]
+        bridge.gltf_exporter(collection).export_properties.export_apply = False
+        bpy.ops.wm.save_mainfile()
+        bpy.ops.wm.open_mainfile(filepath=bpy.data.filepath)
+        collection = bpy.data.collections["tower"]
+        self.assertTrue(bridge.gltf_exporter(collection).export_properties.export_apply,
+                        "starší zdroj bez nastavení dostal výchozí")
+
+        bridge.gltf_exporter(collection).export_properties.export_apply = False
+        bpy.ops.wm.save_mainfile()
+        bpy.ops.wm.open_mainfile(filepath=bpy.data.filepath)
+        self.assertFalse(bridge.gltf_exporter(bpy.data.collections["tower"]).export_properties.export_apply,
+                         "vlastní nastavení zdroje se nepřepíše")
+
+
+def glb_vertex_count(path: str) -> int:
+    with open(path, "rb") as handle:
+        handle.seek(12)
+        length, _ = struct.unpack("<II", handle.read(8))
+        gltf = json.loads(handle.read(length))
+    return sum(
+        gltf["accessors"][primitive["attributes"]["POSITION"]]["count"]
+        for mesh in gltf["meshes"] for primitive in mesh["primitives"]
+    )
 
 
 class PersonalSourceEditTest(BridgeCase):
