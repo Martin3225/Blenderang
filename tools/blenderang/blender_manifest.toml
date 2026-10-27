@@ -4,7 +4,7 @@ id = "blenderang"
 version = "0.1.0"
 name = "Blenderang"
 tagline = "Round-trip Godot scenes through Blender"
-maintainer = "JanekRPG"
+maintainer = "Martin Vacek"
 type = "add-on"
 
 website = "https://github.com/Martin3225/Blenderang"

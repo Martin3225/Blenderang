@@ -10,3 +10,10 @@
 *.res binary
 *.blend binary
 *.tscn text eol=lf
+
+# Keep the Godot Asset Library download to the plugin itself.
+# The Blender extension ships as a zip on GitHub Releases instead.
+/tests export-ignore
+/tools export-ignore
+/.gitattributes export-ignore
+/.gitignore export-ignore
