@@ -19,18 +19,28 @@ static func blender_path() -> String:
 	return str(settings.get_setting(SETTING_BLENDER_PATH))
 
 
-## Python that Blender runs after startup. In the GUI the call is deferred with
-## a timer, because during [code]--python-expr[/code] no window exists yet and the
-## operator would have no context. In [code]--background[/code] timers don't
-## run, so it's called right away.
+## Python that opens the scene from the manifest after Blender starts.
 static func startup_expression(manifest_abs: String) -> String:
 	# A JSON string is also a valid Python literal, including the backslashes
 	# in Windows paths.
-	var literal: String = JSON.stringify(manifest_abs)
+	return _deferred_call("bpy.ops.bb.open_from_godot(filepath=%s)" % JSON.stringify(manifest_abs))
+
+
+## Python that opens a model's source .blend without a scene; saving it
+## regenerates [param asset] in the project at [param root_abs].
+static func source_expression(source_abs: String, asset: String, root_abs: String) -> String:
+	return _deferred_call("bpy.ops.bb.open_source(filepath=%s, asset=%s, root=%s)" % [
+		JSON.stringify(source_abs), JSON.stringify(asset), JSON.stringify(root_abs)])
+
+
+## In the GUI the call is deferred with a timer, because during
+## [code]--python-expr[/code] no window exists yet and the operator would have
+## no context. In [code]--background[/code] timers don't run, so it's called right away.
+static func _deferred_call(call: String) -> String:
 	return "\n".join([
 		"import bpy",
 		"def _bb_open():",
-		"    bpy.ops.bb.open_from_godot(filepath=%s)" % literal,
+		"    " + call,
 		"if bpy.app.background:",
 		"    _bb_open()",
 		"else:",
@@ -39,6 +49,15 @@ static func startup_expression(manifest_abs: String) -> String:
 
 
 static func launch(manifest_abs: String) -> Error:
+	return _launch(startup_expression(manifest_abs))
+
+
+static func launch_source(source_abs: String, asset: String) -> Error:
+	var root: String = ProjectSettings.globalize_path("res://").trim_suffix("/")
+	return _launch(source_expression(source_abs, asset, root))
+
+
+static func _launch(expression: String) -> Error:
 	var executable: String = blender_path()
 	if executable.is_empty() or not FileAccess.file_exists(executable):
 		push_error(
@@ -46,5 +65,5 @@ static func launch(manifest_abs: String) -> Error:
 			% executable
 		)
 		return ERR_FILE_NOT_FOUND
-	var pid: int = OS.create_process(executable, ["--python-expr", startup_expression(manifest_abs)])
+	var pid: int = OS.create_process(executable, ["--python-expr", expression])
 	return OK if pid > 0 else FAILED

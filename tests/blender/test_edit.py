@@ -84,9 +84,22 @@ class EditTest(BridgeCase):
         self.assertEqual(bpy.ops.bb.return_to_scene(), {"FINISHED"})
         self.assertEqual(bpy.data.filepath, "")
         self.assertIsNone(bridge.edit_session())
-        self.assertFalse(os.path.exists(os.path.join(harness.PIPELINE, "bb_edit.json")))
         tower = bpy.data.objects["Tower"]
         self.assertEqual(tower.get(bridge.P_TIER), "library", "after returning the scene sees the new source")
+
+        # Returning ends the scene context, not the source-to-asset binding.
+        source = os.path.join(harness.ASSETS, "tower.blend")
+        bpy.ops.wm.open_mainfile(filepath=source, load_ui=False)
+        session = bridge.edit_session()
+        self.assertIsNotNone(session)
+        self.assertEqual(session["manifest"], "")
+        self.assertIsNone(bpy.data.collections.get(bridge.COLL_CONTEXT))
+        self.assertFalse(bpy.ops.bb.return_to_scene.poll())
+        glb = os.path.join(harness.ASSETS, "tower.glb")
+        before = os.stat(glb).st_mtime_ns
+        time.sleep(0.05)
+        bpy.ops.wm.save_mainfile()
+        self.assertGreater(os.stat(glb).st_mtime_ns, before, "reopening keeps export on save")
 
     def test_edit_requires_source(self):
         self.open_scene()
@@ -164,8 +177,8 @@ class PersonalSourceEditTest(BridgeCase):
         scene = self.open_scene()
         bridge.choose_source(scene, "res://fixtures/assets/tower.glb", outside)
 
-        self.assertTrue(bridge._pointer_path().startswith(os.path.dirname(harness.PROJECT)),
-                        "the edit pointer is in the tests' isolated config, not the user's")
+        self.assertTrue(bridge._sessions_path().startswith(os.path.dirname(harness.PROJECT)),
+                        "the edit sessions are in the tests' isolated config, not the user's")
         self.assertEqual(bpy.ops.bb.edit_source(name="Tower"), {"FINISHED"})
         self.assertTrue(bridge._same_file(bpy.data.filepath, outside))
         self.assertIsNotNone(bridge.edit_session(), "the edit is found outside the project too")
@@ -180,3 +193,43 @@ class PersonalSourceEditTest(BridgeCase):
         self.assertEqual(bpy.ops.bb.return_to_scene(), {"FINISHED"})
         self.assertIsNone(bridge.edit_session())
         self.assertEqual(bpy.data.objects["Tower"].get(bridge.P_SRC_BLEND), outside)
+
+
+class SourceFromGodotTest(BridgeCase):
+    """"Open source in Blender" from Godot's FileSystem: the model's .blend without a scene."""
+
+    def open_from_godot(self) -> str:
+        from test_build import write_source
+        source = write_source("crate.blend", "crate")
+        # The Python exactly as Godot passes it to Blender (tests/tools/export_manifests.gd).
+        with open(os.path.join(harness.PIPELINE, "source_expr.py"), encoding="utf-8") as handle:
+            exec(handle.read(), {})
+        return source
+
+    def test_saving_regenerates_asset(self):
+        source = self.open_from_godot()
+        self.assertTrue(bridge._same_file(bpy.data.filepath, source))
+        session = bridge.edit_session()
+        self.assertIsNotNone(session)
+        self.assertEqual(session["manifest"], "")
+        self.assertIsNone(bpy.data.collections.get(bridge.COLL_CONTEXT), "no scene around")
+        self.assertFalse(bpy.ops.bb.return_to_scene.poll(), "there is no scene to return to")
+        self.assertEqual(bpy.context.view_layer.active_layer_collection.collection.name, "crate")
+
+        glb = os.path.join(harness.ASSETS, "crate.glb")
+        before = os.stat(glb).st_mtime_ns
+        time.sleep(0.05)
+        bpy.ops.wm.save_mainfile()
+        self.assertGreater(os.stat(glb).st_mtime_ns, before, "saving regenerates the .glb in the project")
+
+    def test_scene_edit_elsewhere_keeps_its_session(self):
+        """Two Blender windows: one edits Tower from the scene, the other opens Crate from Godot."""
+        self.open_scene()
+        bpy.ops.bb.promote_source(name="Tower")
+        bpy.ops.bb.edit_source(name="Tower")
+        tower = bpy.data.filepath
+        self.open_from_godot()
+        bpy.ops.wm.open_mainfile(filepath=tower)
+        session = bridge.edit_session()
+        self.assertIsNotNone(session, "Tower's edit survived")
+        self.assertTrue(session["manifest"].endswith("basic.json"))

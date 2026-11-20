@@ -9,11 +9,11 @@ extends EditorPlugin
 ## Changes from Blender are loaded into the open scene automatically.
 
 const MENU_NAME: String = "Blenderang"
-const PERSONAL_SOURCE_NOTICE: String = """%s is outside the Godot project.
+const PERSONAL_SOURCE_NOTICE: String = """%s is outside the Godot project and the models folder.
 
 The path is not saved in the project, it only applies to you. Others on the team won't see this source and can't edit the model; they will still see only the .glb.
 
-To give everyone the source, put the .blend inside the project and pick it again."""
+To give everyone the source, put the .blend inside the project or the models folder and pick it again."""
 const WATCH_INTERVAL: float = 1.0
 
 enum Action {
@@ -22,6 +22,7 @@ enum Action {
 	UNMARK_SELECTION,
 	MARK_PROPS,
 	PICK_SOURCE,
+	SET_MODELS_FOLDER,
 	EXPORT_MANIFEST,
 	IMPORT_MANIFEST,
 }
@@ -45,6 +46,7 @@ func _enter_tree() -> void:
 	_menu.add_item("Unmark selection", Action.UNMARK_SELECTION)
 	_menu.add_item("Mark all art instances in scene", Action.MARK_PROPS)
 	_menu.add_item("Pick source .blend for selection…", Action.PICK_SOURCE)
+	_menu.add_item("Set models folder…", Action.SET_MODELS_FOLDER)
 	_menu.add_separator()
 	_menu.add_item("Export manifest only", Action.EXPORT_MANIFEST)
 	_menu.add_item("Load changes from Blender manually", Action.IMPORT_MANIFEST)
@@ -63,7 +65,7 @@ func _enter_tree() -> void:
 		EditorContextMenuPlugin.CONTEXT_SLOT_SCENE_TABS,
 		EditorContextMenuPlugin.CONTEXT_SLOT_FILESYSTEM,
 	]:
-		var menu: EditorContextMenuPlugin = preload("bb_context_menu.gd").new(open_scene_in_blender)
+		var menu: EditorContextMenuPlugin = preload("bb_context_menu.gd").new(open_scene_in_blender, open_source_in_blender)
 		add_context_menu_plugin(slot, menu)
 		_context_menus.append(menu)
 
@@ -117,7 +119,22 @@ func open_scene_in_blender(path: String) -> void:
 	_open_in_blender(root)
 
 
+## Entry point from the FileSystem context menu: the model's source .blend in
+## Blender without a scene; saving it there regenerates the asset.
+func open_source_in_blender(asset: String) -> void:
+	var stored: String = BBPaths.source_for(asset)
+	if stored.is_empty():
+		push_warning("Blenderang: %s has no source .blend." % asset)
+		return
+	var source: String = BBPaths.absolute_source(stored)
+	if BBLauncher.launch_source(source, asset) == OK:
+		print("Blenderang: launching Blender with %s." % source)
+
+
 func _on_action(id: int) -> void:
+	if id == Action.SET_MODELS_FOLDER:
+		_set_models_folder()
+		return
 	var root: Node = EditorInterface.get_edited_scene_root()
 	if root == null:
 		push_warning("Blenderang: no scene is open.")
@@ -174,7 +191,13 @@ func _pick_source() -> void:
 	dialog.access = EditorFileDialog.ACCESS_FILESYSTEM
 	dialog.add_filter("*.blend", "Blender files")
 	dialog.title = "Source .blend for %s" % asset.get_file()
-	dialog.current_path = ProjectSettings.globalize_path("res://" + BBPaths.expected_source_for(asset))
+	var current: String = BBPaths.source_for(asset)
+	if not current.is_empty():
+		dialog.current_path = BBPaths.absolute_source(current)
+	elif not BBPaths.models_folder().is_empty():
+		dialog.current_dir = BBPaths.models_folder()
+	else:
+		dialog.current_path = ProjectSettings.globalize_path("res://" + BBPaths.expected_source_for(asset))
 	dialog.file_selected.connect(func(path: String) -> void:
 		dialog.queue_free()
 		var personal: bool = BBPaths.choose_source(asset, path)
@@ -182,6 +205,27 @@ func _pick_source() -> void:
 		print("Blenderang: %s → %s%s" % [asset.get_file(), path, " (only for you)" if personal else ""])
 		if personal:
 			_warn_personal_source(path)
+	)
+	dialog.canceled.connect(dialog.queue_free)
+	EditorInterface.get_base_control().add_child(dialog)
+	dialog.popup_centered_ratio(0.6)
+
+
+## Where the team's shared folder of source .blend files is on this disk. Saved
+## only for you; paths into the folder written to [code].bbsrc[/code] are relative
+## to it, so they work for everyone wherever they keep it.
+func _set_models_folder() -> void:
+	var dialog: EditorFileDialog = EditorFileDialog.new()
+	dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_DIR
+	dialog.access = EditorFileDialog.ACCESS_FILESYSTEM
+	dialog.title = "Models folder (shared source .blend files)"
+	var current: String = BBPaths.models_folder()
+	if not current.is_empty():
+		dialog.current_dir = current
+	dialog.dir_selected.connect(func(path: String) -> void:
+		dialog.queue_free()
+		if BBPaths.set_models_folder(path):
+			print("Blenderang: models folder → %s (only for you)" % BBPaths.models_folder())
 	)
 	dialog.canceled.connect(dialog.queue_free)
 	EditorInterface.get_base_control().add_child(dialog)

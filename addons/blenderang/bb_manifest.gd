@@ -24,6 +24,8 @@ class Walk extends RefCounted:
 
 static func export_scene(root: Node) -> Dictionary:
 	var walk: Walk = Walk.new()
+	# The models folder may have changed since the last export (git pull).
+	BBPaths.forget_models_index()
 	BBOwnership.collect_ids(root, walk.duplicates)
 	_walk_children(root, root, walk)
 	return {
@@ -140,6 +142,7 @@ static func _is_container(node: Node) -> bool:
 
 static func _prop_entry(node: Node, root: Node) -> Dictionary:
 	var node3d: Node3D = node as Node3D
+	var source: String = BBPaths.source_for(node.scene_file_path)
 	var entry: Dictionary = {
 		"bb_id": BBOwnership.get_id(node),
 		"owner": "blender",
@@ -148,13 +151,12 @@ static func _prop_entry(node: Node, root: Node) -> Dictionary:
 		"parent": str(root.get_path_to(node.get_parent())),
 		"src": node.scene_file_path,
 		"xform": _serialize_xform(global_xform(node3d, root)),
-		"tier": BBPaths.tier_for(node.scene_file_path),
+		"tier": BBPaths.tier_of(source),
 	}
 	# The bounding box serves as context when editing another asset in its own
 	# .blend, so you can see what stands around it without importing anything.
 	if node3d != null:
 		entry["bounds"] = _serialize_aabb(_subtree_aabb(node3d))
-	var source: String = BBPaths.source_for(node.scene_file_path)
 	if source.is_empty():
 		entry["src_blend_missing"] = BBPaths.expected_source_for(node.scene_file_path)
 	else:

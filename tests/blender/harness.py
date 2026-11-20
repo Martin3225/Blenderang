@@ -56,9 +56,6 @@ class BridgeCase(unittest.TestCase):
             source = os.path.join(_PRISTINE_PIPELINE, name)
             if os.path.isfile(source):
                 shutil.copyfile(source, os.path.join(PIPELINE, name))
-        marker = os.path.join(PIPELINE, "bb_edit.json")
-        if os.path.exists(marker):
-            os.remove(marker)
         shutil.rmtree(os.path.join(PIPELINE, "local"), ignore_errors=True)
         pointer = os.path.join(bpy.utils.user_resource("CONFIG"), "blenderang_edit.json")
         if os.path.exists(pointer):

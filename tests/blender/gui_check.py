@@ -128,8 +128,13 @@ def step_scene_opened():
 
 def step_promote_and_edit():
     window, area = view3d()
+    keymap = bpy.context.window_manager.keyconfigs.addon.keymaps.get("Object Mode")
+    record("Tab on a model opens Blenderang's menu",
+           keymap is not None and any(i.idname == "bb.model_pie" and i.type == "TAB" for i in keymap.keymap_items))
+    bpy.context.view_layer.objects.active = bpy.data.objects["Tower"]
     with bpy.context.temp_override(window=window, area=area):
-        record("make source from the list button", bpy.ops.bb.promote_source(name="Tower") == {"FINISHED"})
+        record("the model menu opens", bpy.ops.bb.model_pie() == {"FINISHED"})
+        record("make source", bpy.ops.bb.promote_source(name="Tower") == {"FINISHED"})
         record("edit model from the list button", bpy.ops.bb.edit_source(name="Tower") == {"FINISHED"})
     return 1.0
 
@@ -139,6 +144,9 @@ def step_in_edit():
     record("context surrounds the model", bpy.data.collections.get(bridge.COLL_CONTEXT) is not None)
     ok, message = panel_drew("edit")
     record("edit panel draws without errors", ok, message)
+    session = bridge.edit_session()
+    record("the model's exporter is shown in the panel",
+           bpy.context.view_layer.active_layer_collection.collection == bridge.session_collection(session))
     bpy.ops.wm.save_mainfile()
     window, area = view3d()
     with bpy.context.temp_override(window=window, area=area):

@@ -162,12 +162,16 @@ def _link_library_collection(blend_path: str, name: str) -> bpy.types.Collection
         available = list(data_from.collections)
         if not available:
             raise BridgeError("%s contains no collection" % blend_path)
-        picked = name if name in available else available[0]
-        data_to.collections = [picked]
+        data_to.collections = [_pick_collection(available, name)]
     linked = data_to.collections[0]
     if linked is None:
         raise BridgeError("could not link a collection from %s" % blend_path)
     return linked
+
+
+def _pick_collection(available: list[str], name: str) -> str:
+    """The collection named after the asset, otherwise the first one in the file."""
+    return name if name in available else available[0]
 
 
 # The glTF importer creates helper objects for armature bone shapes
@@ -238,12 +242,14 @@ def _preview_collection(entry: dict[str, Any], root: str) -> bpy.types.Collectio
 
 
 def source_of(entry: dict[str, Any], root: str) -> str:
-    """Path to the source .blend (relative to the project, absolute for a
-    personal source), or empty.
+    """Path to the source .blend as kept on the model: relative to the project,
+    ``models://…`` inside the models folder, absolute for a personal source;
+    empty when there is none. ``source_abs`` turns it into a file path.
 
     Same rule as BBPaths in Godot: personal choice (only for you) →
-    ``<asset>.bbsrc`` (shared) → ``.blend`` next to the asset. Blender
-    evaluates it itself so it sees a newly picked source right away.
+    ``<asset>.bbsrc`` (shared) → ``.blend`` next to the asset →
+    ``<name>.blend`` in the models folder. Blender evaluates it itself so it
+    sees a newly picked source right away.
     """
     asset = entry.get("src", "")
     personal = local_sources(root).get(asset, "")
@@ -252,23 +258,35 @@ def source_of(entry: dict[str, Any], root: str) -> str:
     override = asset_abs(root, asset) + ".bbsrc"
     if os.path.isfile(override):
         with open(override, encoding="utf-8") as handle:
-            relative = handle.read().strip().replace("res://", "", 1)
+            stored = handle.read().strip().replace("res://", "", 1)
     else:
-        relative = expected_source(asset)
-    return relative if os.path.isfile(os.path.join(root, relative)) else ""
+        stored = expected_source(asset)
+        if not os.path.isfile(os.path.join(root, stored)):
+            stored = find_in_models_folder(root, asset)
+    absolute = source_abs(root, stored) if stored else ""
+    return stored if absolute and os.path.isfile(absolute) else ""
+
+
+def source_abs(root: str, stored: str) -> str:
+    """File path of a source as ``source_of`` returns it; empty for a
+    ``models://`` path when the models folder isn't set."""
+    if stored.startswith(MODELS_PREFIX):
+        folder = models_folder(root)
+        return os.path.join(folder, *stored[len(MODELS_PREFIX):].split("/")) if folder else ""
+    return os.path.join(root, stored)   # an absolute (personal) path stays as it is
 
 
 def _resolve_source(entry: dict[str, Any], root: str) -> tuple[bpy.types.Collection | None, str]:
     """The collection the instance will point to (linked source, or preview)
-    and the relative path to the source, if there is one."""
-    relative = source_of(entry, root)
-    if relative:
+    and the stored path of the source, if there is one."""
+    stored = source_of(entry, root)
+    if stored:
         stem = os.path.basename(entry.get("src", "")).rsplit(".", 1)[0]
         try:
-            return _link_library_collection(os.path.join(root, relative), stem), relative
+            return _link_library_collection(source_abs(root, stored), stem), stored
         except (OSError, BridgeError) as error:
             # A broken or empty .blend must not crash opening the whole scene.
-            print("Blenderang: cannot load source %s (%s), using the .glb preview" % (relative, error))
+            print("Blenderang: cannot load source %s (%s), using the .glb preview" % (stored, error))
     return _preview_collection(entry, root), ""
 
 
@@ -320,6 +338,8 @@ WARNINGS: list[str] = []
 
 
 def warn(message: str) -> None:
+    if message in WARNINGS:
+        return
     WARNINGS.append(message)
     print("Blenderang:", message)
 
@@ -331,6 +351,7 @@ def build(scene: bpy.types.Scene, manifest_path: str) -> dict[str, int]:
     as an empty axis at its place, a broken context is replaced by bounding boxes.
     """
     WARNINGS.clear()
+    forget_models_index()   # the models folder may have changed (git pull)
     manifest = load_manifest(manifest_path)
     root = project_root_for(manifest_path)
 
@@ -670,7 +691,7 @@ def export_collection(collection: bpy.types.Collection) -> None:
 def promote_to_library(obj: bpy.types.Object, root: str) -> str:
     """Turns a preview imported from .glb into its own source .blend.
 
-    The collection is written to a new file next to the asset with the export
+    The collection is written to a new file (``new_source``) with the export
     already set up, the local copy is removed and the file is linked in its place.
     From then on the .blend is the source of truth.
     """
@@ -681,13 +702,15 @@ def promote_to_library(obj: bpy.types.Object, root: str) -> str:
         raise BridgeError("the asset already has a source")
 
     asset_src = str(obj.get(P_SRC, ""))
-    target = os.path.join(root, expected_source(asset_src))
+    stored = new_source(root, asset_src)
+    target = source_abs(root, stored)
     if os.path.exists(target):
-        raise BridgeError("%s already exists; pick it as the source in Godot" % target)
+        raise BridgeError("%s already exists; pick it as the source" % target)
     os.makedirs(os.path.dirname(target), exist_ok=True)
     collection.pop(P_PREVIEW, None)
     ensure_exporter(collection, asset_abs(root, asset_src))
     bpy.data.libraries.write(target, {collection}, fake_user=True)
+    forget_models_index()
 
     # The same asset can have several instances in the scene; all are relinked.
     instances = [o for o in bpy.data.objects if o.instance_collection == collection]
@@ -697,12 +720,19 @@ def promote_to_library(obj: bpy.types.Object, root: str) -> str:
     bpy.data.collections.remove(collection)
 
     linked = _link_library_collection(target, name)
-    relative = os.path.relpath(target, root).replace(os.sep, "/")
     for instance in instances:
         instance.instance_collection = linked
         instance[P_TIER] = "library"
-        instance[P_SRC_BLEND] = relative
-    return target
+        instance[P_SRC_BLEND] = stored
+    return stored
+
+
+def new_source(root: str, asset_src: str) -> str:
+    """Where *Make source* creates the .blend: at the asset's own path inside
+    the models folder when one is set (so the name search finds it for
+    everyone), otherwise next to the asset."""
+    expected = expected_source(asset_src)
+    return MODELS_PREFIX + expected if models_folder(root) else expected
 
 
 # ------------------------------------------------------------ source editing
@@ -714,20 +744,45 @@ def promote_to_library(obj: bpy.types.Object, root: str) -> str:
 # source file.
 
 COLL_CONTEXT = "BB_Context"
-EDIT_MARKER = "bb_edit.json"
 
 
-def _marker_path(root: str) -> str:
-    return os.path.join(root, ".pipeline", EDIT_MARKER)
+def _sessions_path() -> str:
+    """Edits in progress, in Blender's user config, keyed by source file.
 
-
-def _pointer_path() -> str:
-    """Pointer to the edit in progress, in Blender's user config.
-
-    The model's source can be outside the project (personal source), so the marker
-    can't be found by walking folders up from the open file.
+    The source can be outside the project (models folder, personal source), so
+    nothing can be found by walking folders up from the open file. One entry per
+    source lets several Blender windows each edit a different model.
     """
     return os.path.join(bpy.utils.user_resource("CONFIG", create=True), "blenderang_edit.json")
+
+
+def _session_key(path: str) -> str:
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _read_sessions() -> dict[str, Any]:
+    try:
+        with open(_sessions_path(), encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_sessions(sessions: dict[str, Any]) -> None:
+    path = _sessions_path()
+    if not sessions:
+        if os.path.isfile(path):
+            os.remove(path)
+        return
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(sessions, handle, indent="\t")
+
+
+def _start_session(session: dict[str, Any]) -> None:
+    sessions = _read_sessions()
+    sessions[_session_key(session["source"])] = session
+    _write_sessions(sessions)
 
 
 def begin_edit(scene: bpy.types.Scene, obj: bpy.types.Object) -> str:
@@ -736,51 +791,68 @@ def begin_edit(scene: bpy.types.Scene, obj: bpy.types.Object) -> str:
     Returns the path to the source .blend to open.
     """
     root = scene.get(S_ROOT, "")
-    relative = obj.get(P_SRC_BLEND, "")
-    if not root or not relative:
+    stored = obj.get(P_SRC_BLEND, "")
+    if not root or not stored:
         raise BridgeError("the asset has no source .blend")
-    source = os.path.join(root, relative)   # a personal source is absolute
+    source = source_abs(root, stored)
+    if not source:
+        raise BridgeError("%s needs the models folder; set it in the Blenderang panel" % stored)
     if not os.path.isfile(source):
         raise BridgeError("source does not exist: %s" % source)
     manifest = stored_manifest_path(scene)
     export(scene)
-    marker = _marker_path(root)
-    with open(marker, "w", encoding="utf-8") as handle:
-        json.dump({
-            "manifest": manifest,
-            "bb_id": str(obj.get(P_ID, "")),
-            "source": source,
-            "asset": str(obj.get(P_SRC, "")),
-            "collection": obj.instance_collection.name if obj.instance_collection else "",
-        }, handle)
-    with open(_pointer_path(), "w", encoding="utf-8") as handle:
-        json.dump({"marker": marker, "root": root}, handle)
+    _start_session({
+        "manifest": manifest,
+        "bb_id": str(obj.get(P_ID, "")),
+        "source": os.path.abspath(source),
+        "asset": str(obj.get(P_SRC, "")),
+        "collection": obj.instance_collection.name if obj.instance_collection else "",
+        "root": root,
+    })
+    return source
+
+
+def begin_source_edit(root: str, asset_src: str, source: str) -> str:
+    """Prepares editing a source opened straight from Godot's FileSystem: no
+    scene around it, but saving regenerates the asset in this project."""
+    if not os.path.isfile(source):
+        raise BridgeError("source does not exist: %s" % source)
+    stem = os.path.basename(asset_src).rsplit(".", 1)[0]
+    with bpy.data.libraries.load(source) as (data_from, _):
+        available = list(data_from.collections)
+    if not available:
+        raise BridgeError("%s contains no collection" % source)
+    _start_session({
+        "manifest": "",
+        "bb_id": "",
+        "source": os.path.abspath(source),
+        "asset": asset_src,
+        "collection": _pick_collection(available, stem),
+        "root": root,
+    })
     return source
 
 
 def edit_session() -> dict[str, Any] | None:
     """Details of the edit in progress, if its source is the file currently open."""
-    if not bpy.data.filepath or not os.path.isfile(_pointer_path()):
+    if not bpy.data.filepath:
         return None
-    try:
-        with open(_pointer_path(), encoding="utf-8") as handle:
-            pointer = json.load(handle)
-        with open(pointer["marker"], encoding="utf-8") as handle:
-            session = json.load(handle)
-    except (OSError, ValueError, KeyError):
-        return None
-    if not _same_file(session.get("source", ""), bpy.data.filepath):
-        return None
-    session["root"] = pointer["root"]
-    return session
+    session = _read_sessions().get(_session_key(bpy.data.filepath))
+    return dict(session) if isinstance(session, dict) and "root" in session else None
 
 
 def end_edit(session: dict[str, Any]) -> str:
-    """Ends the edit; returns the manifest to rebuild the scene from."""
-    for path in (_marker_path(session["root"]), _pointer_path()):
-        if os.path.isfile(path):
-            os.remove(path)
-    return session["manifest"]
+    """Ends scene-context editing but keeps the source's export binding.
+
+    Reopening the source by hand still exports on save, without restoring the
+    old scene context. Returns the manifest to rebuild the scene from.
+    """
+    manifest = session["manifest"]
+    binding = dict(session)
+    binding["manifest"] = ""
+    binding["bb_id"] = ""
+    _start_session(binding)
+    return manifest
 
 
 def build_context(session: dict[str, Any]) -> int:
@@ -793,6 +865,8 @@ def build_context(session: dict[str, Any]) -> int:
     """
     clear_context()
     WARNINGS.clear()
+    if not session.get("manifest"):
+        return 0   # opened from Godot's FileSystem, there is no scene around
     manifest = load_manifest(session["manifest"])
     focus = next((e for e in manifest["nodes"] if e.get("bb_id") == session["bb_id"]), None)
     if focus is None:
@@ -846,6 +920,18 @@ def session_collection(session: dict[str, Any]) -> bpy.types.Collection | None:
     return bpy.data.collections.get(session.get("collection", ""))
 
 
+def activate_collection(view_layer: bpy.types.ViewLayer, collection: bpy.types.Collection) -> bool:
+    """Makes the collection active in the outliner; Blender's exporter UI follows it."""
+    pending = [view_layer.layer_collection]
+    while pending:
+        layer = pending.pop()
+        if layer.collection == collection:
+            view_layer.active_layer_collection = layer
+            return True
+        pending.extend(layer.children)
+    return False
+
+
 def collection_has_exporter(session: dict[str, Any]) -> bool:
     collection = session_collection(session)
     return collection is not None and any(e.filepath for e in collection.exporters)
@@ -865,7 +951,10 @@ def setup_session_exporter(session: dict[str, Any]) -> str:
 
 def _source_label(obj: bpy.types.Object, tier: str, source: str) -> str:
     if tier != "library":
-        return "none, will be created at %s" % expected_source(str(obj.get(P_SRC, "")))
+        root = bpy.context.scene.get(S_ROOT, "")
+        return "none, will be created at %s" % new_source(root, str(obj.get(P_SRC, "")))
+    if source.startswith(MODELS_PREFIX):
+        return "%s (models folder)" % source[len(MODELS_PREFIX):]
     if os.path.isabs(source):
         return "%s (only for you, outside the project)" % source
     return source
@@ -905,14 +994,21 @@ def override_path(root: str, asset_src: str) -> str:
     return asset_abs(root, asset_src) + ".bbsrc"
 
 
-# Personal choice of sources outside the project. Godot reads the same file (BBPaths).
-# The folder has a .gitignore with "*", so it's never committed.
+# Personal files, never committed (the folder has a .gitignore with "*").
+# Godot reads the same files (BBPaths).
+# sources.json: personal choice of sources outside the project and the models folder.
+# settings.json: where the models folder is on this disk.
 LOCAL_DIR = os.path.join(".pipeline", "local")
 LOCAL_SOURCES = os.path.join(LOCAL_DIR, "sources.json")
+LOCAL_SETTINGS = os.path.join(LOCAL_DIR, "settings.json")
+
+# Shared paths into the models folder: ``models://<path inside the folder>``.
+# The folder is somewhere else on every disk; the path inside it is the same.
+MODELS_PREFIX = "models://"
 
 
-def local_sources(root: str) -> dict[str, str]:
-    path = os.path.join(root, LOCAL_SOURCES)
+def _read_local_json(root: str, name: str) -> dict[str, Any]:
+    path = os.path.join(root, name)
     if not os.path.isfile(path):
         return {}
     try:
@@ -923,25 +1019,101 @@ def local_sources(root: str) -> dict[str, str]:
     return data if isinstance(data, dict) else {}
 
 
-def _write_local(root: str, asset_src: str, path: str) -> None:
-    sources = local_sources(root)
-    if path:
-        sources[asset_src] = path
-    else:
-        sources.pop(asset_src, None)
+def _write_local_json(root: str, name: str, data: dict[str, Any]) -> None:
     directory = os.path.join(root, LOCAL_DIR)
     os.makedirs(directory, exist_ok=True)
     ignore = os.path.join(directory, ".gitignore")
     if not os.path.isfile(ignore):
         with open(ignore, "w", encoding="utf-8") as handle:
             handle.write("*\n")
-    with open(os.path.join(root, LOCAL_SOURCES), "w", encoding="utf-8") as handle:
-        json.dump(sources, handle, indent="\t")
+    with open(os.path.join(root, name), "w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent="\t")
+
+
+def local_sources(root: str) -> dict[str, str]:
+    return _read_local_json(root, LOCAL_SOURCES)
+
+
+def _write_local(root: str, asset_src: str, path: str) -> None:
+    sources = local_sources(root)
+    if path:
+        sources[asset_src] = path
+    else:
+        sources.pop(asset_src, None)
+    _write_local_json(root, LOCAL_SOURCES, sources)
+
+
+def models_folder(root: str) -> str:
+    """Absolute path of the models folder on this disk, or empty when not set."""
+    folder = str(_read_local_json(root, LOCAL_SETTINGS).get("models_folder", ""))
+    return os.path.normpath(folder) if folder else ""
+
+
+# .blend files in the models folder: folder → lowercase name → sorted paths inside it.
+# Scanned once per scene build; ``forget_models_index`` drops it.
+_MODELS_INDEX: dict[str, dict[str, list[str]]] = {}
+
+
+def forget_models_index() -> None:
+    _MODELS_INDEX.clear()
+
+
+def _models_index(folder: str) -> dict[str, list[str]]:
+    index = _MODELS_INDEX.get(folder)
+    if index is not None:
+        return index
+    index = {}
+    for current, directories, files in os.walk(folder):
+        directories[:] = [name for name in directories if not name.startswith(".")]   # .git
+        inside = os.path.relpath(current, folder)
+        for name in files:
+            if name.lower().endswith(".blend"):
+                path = name if inside == os.curdir else os.path.join(inside, name)
+                index.setdefault(name.lower(), []).append(path.replace(os.sep, "/"))
+    for paths in index.values():
+        paths.sort()
+    _MODELS_INDEX[folder] = index
+    return index
+
+
+def find_in_models_folder(root: str, asset_src: str) -> str:
+    """``models://…`` path of ``<asset name>.blend`` in the models folder, or empty.
+
+    The name is matched case-insensitively at any depth. With several matches the
+    one at the asset's own path (``levels/castle/castle.blend``) wins, otherwise
+    the first alphabetically; picking the source by hand makes it explicit.
+    """
+    folder = models_folder(root)
+    if not folder:
+        return ""
+    expected = expected_source(asset_src)
+    name = os.path.basename(expected)
+    matches = _models_index(folder).get(name.lower(), [])
+    if not matches:
+        return ""
+    if expected in matches:
+        return MODELS_PREFIX + expected
+    if len(matches) > 1:
+        warn("several %s in the models folder, using %s; pick the source to choose another" % (name, matches[0]))
+    return MODELS_PREFIX + matches[0]
+
+
+def _relative_inside(path: str, folder: str) -> str:
+    """``path`` relative to ``folder`` with forward slashes, or empty when it's outside."""
+    if not folder:
+        return ""
+    try:
+        relative = os.path.relpath(path, folder)
+    except ValueError:   # Windows: a different drive
+        return ""
+    if relative == os.pardir or relative.startswith(os.pardir + os.sep) or os.path.isabs(relative):
+        return ""
+    return relative.replace(os.sep, "/")
 
 
 def source_choice(root: str, asset_src: str) -> str:
     """How the source is chosen: ``personal`` (only for you), ``shared`` (.bbsrc),
-    or empty (convention: .blend next to the asset)."""
+    or empty (convention: .blend next to the asset or found in the models folder)."""
     if asset_src in local_sources(root):
         return "personal"
     if os.path.isfile(override_path(root, asset_src)):
@@ -955,10 +1127,11 @@ def _models_of(scene: bpy.types.Scene, asset_src: str) -> list[bpy.types.Object]
 
 def choose_source(scene: bpy.types.Scene, asset_src: str, blend_path: str) -> tuple[str, bool]:
     """Sets an existing .blend as the asset's source and relinks all its
-    instances. Returns (path, personal).
+    instances. Returns (stored path, personal).
 
-    Inside the project it's saved to the shared ``.bbsrc`` (relative to the root).
-    Outside the project it's saved only for you; others on the team won't see it.
+    Inside the project it's saved to the shared ``.bbsrc`` relative to the root,
+    inside the models folder as ``models://…``. Anywhere else it's saved only
+    for you; others on the team won't see it.
     """
     root = scene.get(S_ROOT, "")
     if not root:
@@ -966,11 +1139,11 @@ def choose_source(scene: bpy.types.Scene, asset_src: str, blend_path: str) -> tu
     absolute = os.path.abspath(blend_path)
     if not os.path.isfile(absolute) or not absolute.lower().endswith(".blend"):
         raise BridgeError("pick an existing .blend file")
-    try:
-        relative = os.path.relpath(absolute, root)
-    except ValueError:   # Windows: a different drive than the project
-        relative = absolute
-    personal = relative.startswith("..") or os.path.isabs(relative)
+    stored = _relative_inside(absolute, root)
+    if not stored:
+        inside_models = _relative_inside(absolute, models_folder(root))
+        stored = MODELS_PREFIX + inside_models if inside_models else ""
+    personal = not stored
 
     stem = os.path.basename(asset_src).rsplit(".", 1)[0]
     collection = _link_library_collection(absolute, stem)
@@ -978,7 +1151,6 @@ def choose_source(scene: bpy.types.Scene, asset_src: str, blend_path: str) -> tu
         stored = absolute
         _write_local(root, asset_src, absolute)
     else:
-        stored = relative.replace(os.sep, "/")
         marker = override_path(root, asset_src)
         if stored == expected_source(asset_src):
             if os.path.isfile(marker):
@@ -997,18 +1169,43 @@ def choose_source(scene: bpy.types.Scene, asset_src: str, blend_path: str) -> tu
 
 def clear_source(scene: bpy.types.Scene, asset_src: str) -> None:
     """Clears the hand-picked source, personal first, then shared. Whatever is
-    left applies again: the shared .bbsrc, the .blend next to the asset, otherwise the .glb preview."""
+    left applies again: the shared .bbsrc, the .blend next to the asset or in the
+    models folder, otherwise the .glb preview."""
     root = scene.get(S_ROOT, "")
     if source_choice(root, asset_src) == "personal":
         _write_local(root, asset_src, "")
     elif os.path.isfile(override_path(root, asset_src)):
         os.remove(override_path(root, asset_src))
+    _relink(scene, root, asset_src)
+
+
+def set_models_folder(scene: bpy.types.Scene, folder: str) -> None:
+    """Sets where the models folder is on this disk (empty unsets it) and
+    relinks every model, so sources found there show up without a rebuild."""
+    root = scene.get(S_ROOT, "")
+    if not root:
+        raise BridgeError("the scene has no manifest loaded")
+    settings = _read_local_json(root, LOCAL_SETTINGS)
+    if folder:
+        folder = os.path.abspath(folder)
+        if not os.path.isdir(folder):
+            raise BridgeError("pick an existing folder")
+        settings["models_folder"] = folder.replace(os.sep, "/")
+    else:
+        settings.pop("models_folder", None)
+    _write_local_json(root, LOCAL_SETTINGS, settings)
+    forget_models_index()
+    for asset_src in sorted({str(obj.get(P_SRC, "")) for obj in scene_models(scene)}):
+        _relink(scene, root, asset_src)
+
+
+def _relink(scene: bpy.types.Scene, root: str, asset_src: str) -> None:
+    """Points all instances of the asset at its source as resolved now."""
     for obj in _models_of(scene, asset_src):
-        entry = {"name": obj.name, "src": asset_src}
-        collection, relative = _resolve_source(entry, root)
+        collection, stored = _resolve_source({"name": obj.name, "src": asset_src}, root)
         obj.instance_collection = collection
-        obj[P_TIER] = "library" if relative else "none"
-        if relative:
-            obj[P_SRC_BLEND] = relative
+        obj[P_TIER] = "library" if stored else "none"
+        if stored:
+            obj[P_SRC_BLEND] = stored
         else:
             obj.pop(P_SRC_BLEND, None)

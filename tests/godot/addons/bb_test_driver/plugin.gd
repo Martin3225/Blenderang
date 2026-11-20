@@ -116,12 +116,26 @@ func _phase_restart(bridge: EditorPlugin) -> void:
 
 func _phase_context_menu(bridge: EditorPlugin) -> void:
 	var opened: Array[String] = []
+	var sources: Array[String] = []
 	var menu: EditorContextMenuPlugin = load("res://addons/blenderang/bb_context_menu.gd").new(
-		func(path: String) -> void: opened.append(path))
+		func(path: String) -> void: opened.append(path), func(path: String) -> void: sources.append(path))
 	menu.call("_on_pressed", PackedStringArray(["res://fixtures/scenes/second.tscn"]))
 	menu.call("_on_pressed", EditorInterface.get_edited_scene_root())
 	_record("context menu gets the path from a file and from a scene tab",
 		opened == ["res://fixtures/scenes/second.tscn", "res://fixtures/scenes/basic.tscn"], "dostal %s" % [opened])
+	menu.call("_on_source_pressed", PackedStringArray(["res://fixtures/assets/crate.glb"]))
+	_record("context menu gets the model from the FileSystem", sources == ["res://fixtures/assets/crate.glb"], "got %s" % [sources])
+
+	# "Open source in Blender": the source next to the asset goes to Blender with the asset and the project.
+	var blend: String = "res://fixtures/assets/crate.blend"
+	FileAccess.open(blend, FileAccess.WRITE).close()
+	bridge.call("open_source_in_blender", "res://fixtures/assets/crate.glb")
+	var source_args: PackedStringArray = await _fake_blender_args()
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(blend))
+	_record("Blender gets the model's source, asset and project",
+		source_args.size() == 2 and source_args[1].contains("bb.open_source")
+		and source_args[1].contains(JSON.stringify(ProjectSettings.globalize_path(blend)))
+		and source_args[1].contains("res://fixtures/assets/crate.glb"), "arguments: %s" % [source_args])
 
 	bridge.call("open_scene_in_blender", "res://fixtures/scenes/second.tscn")
 	var args: PackedStringArray = await _fake_blender_args()

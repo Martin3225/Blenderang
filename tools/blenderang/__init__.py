@@ -138,13 +138,22 @@ class BB_OT_rebuild(bpy.types.Operator):
 
 
 class BB_OT_promote_source(bpy.types.Operator):
-    """Turn a model imported from .glb into its own editable .blend next to
-    the asset"""
+    """Turn a model imported from .glb into its own editable .blend"""
 
     bl_idname = "bb.promote_source"
     bl_label = "Make source from .glb"
 
     name: StringProperty(options={"HIDDEN", "SKIP_SAVE"})
+
+    @classmethod
+    def description(cls, context: bpy.types.Context, properties: bpy.types.OperatorProperties) -> str:
+        obj = _target(context, properties.name)
+        if obj is None or bridge.P_SRC not in obj:
+            return cls.__doc__
+        target = bridge.new_source(context.scene.get(bridge.S_ROOT, ""), str(obj[bridge.P_SRC]))
+        if target.startswith(bridge.MODELS_PREFIX):
+            return "Create %s in the models folder from the .glb preview" % target[len(bridge.MODELS_PREFIX):]
+        return "Create %s next to the asset from the .glb preview" % target
 
     def execute(self, context: bpy.types.Context) -> set[str]:
         obj = _target(context, self.name)
@@ -155,7 +164,7 @@ class BB_OT_promote_source(bpy.types.Operator):
             created = bridge.promote_to_library(obj, root)
         except bridge.BridgeError as error:
             return _report(self, error)
-        self.report({"INFO"}, "Source created: %s" % os.path.relpath(created, root))
+        self.report({"INFO"}, "Source created: %s" % created)
         return {"FINISHED"}
 
 
@@ -194,8 +203,7 @@ class BB_OT_choose_source(bpy.types.Operator, ImportHelper):
         obj = _target(context, self.name)
         root = context.scene.get(bridge.S_ROOT, "")
         if obj is not None and root:
-            # The browser starts next to the asset, where the source lives by convention.
-            self.filepath = os.path.join(root, bridge.expected_source(str(obj.get(bridge.P_SRC, ""))))
+            self.filepath = _pick_start(root, obj)
         return ImportHelper.invoke(self, context, event)
 
     def execute(self, context: bpy.types.Context) -> set[str]:
@@ -214,12 +222,26 @@ class BB_OT_choose_source(bpy.types.Operator, ImportHelper):
         return {"FINISHED"}
 
 
+def _pick_start(root: str, obj: bpy.types.Object) -> str:
+    """Where the file browser starts: the current source, otherwise the models
+    folder, otherwise next to the asset where the source lives by convention."""
+    stored = str(obj.get(bridge.P_SRC_BLEND, ""))
+    current = bridge.source_abs(root, stored) if stored else ""
+    if current:
+        return current
+    folder = bridge.models_folder(root)
+    if folder:
+        return folder + os.sep
+    return os.path.join(root, bridge.expected_source(str(obj.get(bridge.P_SRC, ""))))
+
+
 PERSONAL_SOURCE_NOTICE = (
-    "The file is outside the Godot project.",
+    "The file is outside the Godot project and the models folder.",
     "The path is not saved in the project, it only applies to you.",
     "Others on the team won't see this source and can't edit the model;",
     "they will still see only the .glb.",
-    "To give everyone the source, put the .blend inside the project and pick it again.",
+    "To give everyone the source, put the .blend inside the project",
+    "or the models folder and pick it again.",
 )
 
 
@@ -251,6 +273,35 @@ class BB_OT_clear_source(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class BB_OT_set_models_folder(bpy.types.Operator):
+    """Where the team's shared folder of source .blend files is on this disk.
+    Saved only for you; shared paths into it are relative, so they work for everyone"""
+
+    bl_idname = "bb.set_models_folder"
+    bl_label = "Set models folder…"
+
+    directory: StringProperty(subtype="DIR_PATH", options={"SKIP_SAVE"})
+    clear: BoolProperty(options={"HIDDEN", "SKIP_SAVE"})
+
+    def invoke(self, context: bpy.types.Context, event: bpy.types.Event) -> set[str]:
+        if self.clear:
+            return self.execute(context)
+        current = bridge.models_folder(context.scene.get(bridge.S_ROOT, ""))
+        if current:
+            self.directory = current + os.sep
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}
+
+    def execute(self, context: bpy.types.Context) -> set[str]:
+        try:
+            bridge.set_models_folder(context.scene, "" if self.clear else self.directory)
+        except (bridge.BridgeError, OSError) as error:
+            return _report(self, error)
+        root = context.scene.get(bridge.S_ROOT, "")
+        self.report({"INFO"}, "Models folder: %s" % (bridge.models_folder(root) or "not set"))
+        return {"FINISHED"}
+
+
 class BB_OT_select_model(bpy.types.Operator):
     """Select the model and frame it in the view"""
 
@@ -273,7 +324,67 @@ class BB_OT_select_model(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class BB_MT_model_pie(bpy.types.Menu):
+    bl_idname = "BB_MT_model_pie"
+    bl_label = "Blenderang model"
+
+    def draw(self, context: bpy.types.Context) -> None:
+        obj = context.active_object
+        # Pie slots fill in the order left, right, bottom, top.
+        pie = self.layout.menu_pie()
+        pie.operator(BB_OT_choose_source.bl_idname, icon="FILEBROWSER").name = obj.name
+        if bridge.source_choice(context.scene.get(bridge.S_ROOT, ""), str(obj.get(bridge.P_SRC, ""))):
+            pie.operator(BB_OT_clear_source.bl_idname, icon="X").name = obj.name
+        else:
+            pie.separator()
+        pie.separator()
+        if obj.get(bridge.P_TIER) == "library":
+            pie.operator(BB_OT_edit_source.bl_idname, text="Edit model", icon="EDITMODE_HLT").name = obj.name
+        else:
+            pie.operator(BB_OT_promote_source.bl_idname, text="Make source", icon="FILE_NEW").name = obj.name
+
+
+class BB_OT_model_pie(bpy.types.Operator):
+    """Blenderang actions for the active model. Bound to Tab in the scene, where
+    Blender would otherwise offer to open or make local the linked source"""
+
+    bl_idname = "bb.model_pie"
+    bl_label = "Blenderang model menu"
+    bl_options = {"INTERNAL"}
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context) -> bool:
+        obj = context.active_object
+        return (obj is not None and bridge.P_ID in obj and context.mode == "OBJECT"
+                and context.scene.get(bridge.S_MANIFEST) is not None)
+
+    def execute(self, context: bpy.types.Context) -> set[str]:
+        bpy.ops.wm.call_menu_pie(name=BB_MT_model_pie.bl_idname)
+        return {"FINISHED"}
+
+
 # -------------------------------------------------------- source editing
+
+
+class BB_OT_open_source(bpy.types.Operator):
+    """Entry point Godot calls on "Open source in Blender": the model's .blend
+    without a scene around it; saving regenerates the asset"""
+
+    bl_idname = "bb.open_source"
+    bl_label = "Open source from Godot"
+    bl_options = {"INTERNAL"}
+
+    filepath: StringProperty(subtype="FILE_PATH")
+    asset: StringProperty()
+    root: StringProperty(subtype="DIR_PATH")
+
+    def execute(self, context: bpy.types.Context) -> set[str]:
+        try:
+            source = bridge.begin_source_edit(self.root, self.asset, self.filepath)
+        except bridge.BridgeError as error:
+            return _report(self, error)
+        bpy.ops.wm.open_mainfile(filepath=source, load_ui=False)
+        return {"FINISHED"}
 
 
 class BB_OT_return_to_scene(bpy.types.Operator):
@@ -284,7 +395,8 @@ class BB_OT_return_to_scene(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context: bpy.types.Context) -> bool:
-        return bridge.edit_session() is not None
+        session = bridge.edit_session()
+        return session is not None and bool(session["manifest"])
 
     def execute(self, context: bpy.types.Context) -> set[str]:
         session = bridge.edit_session()
@@ -297,21 +409,19 @@ class BB_OT_return_to_scene(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class BB_OT_export_now(bpy.types.Operator):
-    """Regenerate the .glb now, without saving the .blend"""
+class BB_OT_show_export_settings(bpy.types.Operator):
+    """Make the model's collection active so its glTF exporter shows here"""
 
-    bl_idname = "bb.export_now"
-    bl_label = "Export now"
+    bl_idname = "bb.show_export_settings"
+    bl_label = "Show export settings"
 
     @classmethod
     def poll(cls, context: bpy.types.Context) -> bool:
         session = bridge.edit_session()
-        return session is not None and bridge.collection_has_exporter(session)
+        return session is not None and bridge.session_collection(session) is not None
 
     def execute(self, context: bpy.types.Context) -> set[str]:
-        session = bridge.edit_session()
-        bridge.export_collection(bridge.session_collection(session))
-        self.report({"INFO"}, "Exported: %s" % session["asset"])
+        bridge.activate_collection(context.view_layer, bridge.session_collection(bridge.edit_session()))
         return {"FINISHED"}
 
 
@@ -333,7 +443,7 @@ class BB_OT_reset_export(bpy.types.Operator):
         return {"FINISHED"}
 
 
-# Labels of the export options in the panel and preferences (order = UI order).
+# Labels of the export options in the preferences (order = UI order).
 EXPORT_LABELS = (
     ("export_apply", "Apply modifiers"),
     ("export_yup", "+Y up"),
@@ -410,6 +520,8 @@ def _on_load_post(_: object) -> None:
         if collection.name not in bpy.context.scene.collection.children:
             bpy.context.scene.collection.children.link(collection)
         bridge.setup_session_exporter(session)
+        # The export settings in the panel belong to the active collection.
+        bridge.activate_collection(bpy.context.view_layer, collection)
     with bpy.context.temp_override(**bridge.ui_context()):
         bridge.build_context(session)
 
@@ -450,7 +562,7 @@ class BB_PT_panel(bpy.types.Panel):
     def draw(self, context: bpy.types.Context) -> None:
         session = bridge.edit_session()
         if session is not None:
-            self._draw_edit(session)
+            self._draw_edit(context, session)
         elif context.scene.get(bridge.S_MANIFEST):
             self._draw_scene(context)
         else:
@@ -493,32 +605,43 @@ class BB_PT_panel(bpy.types.Panel):
             if obj.get(bridge.P_TIER) == "library":
                 row.operator(BB_OT_edit_source.bl_idname, text="Edit", icon="EDITMODE_HLT").name = obj.name
             else:
-                row.operator(BB_OT_promote_source.bl_idname, text="Make source", icon="FILE_NEW").name = obj.name
+                row.operator(BB_OT_choose_source.bl_idname, text="Pick source", icon="FILEBROWSER").name = obj.name
         if any(o.get(bridge.P_TIER) != "library" for o in models):
             box.label(text="Without a source, a model is only a .glb preview.", icon="INFO")
 
-    def _draw_edit(self, session: dict) -> None:
+        folder = bridge.models_folder(scene.get(bridge.S_ROOT, ""))
+        row = layout.row(align=True)
+        row.label(text="Models folder: %s" % (folder or "not set"), icon="FILE_FOLDER")
+        row.operator(BB_OT_set_models_folder.bl_idname, text="", icon="FILEBROWSER")
+        if folder:
+            row.operator(BB_OT_set_models_folder.bl_idname, text="", icon="X").clear = True
+
+    def _draw_edit(self, context: bpy.types.Context, session: dict) -> None:
         layout = self.layout
         layout.label(text="Editing: %s" % os.path.basename(session["asset"]), icon="EDITMODE_HLT")
-        back = layout.row()
-        back.scale_y = 1.6
-        back.operator(BB_OT_return_to_scene.bl_idname, icon="LOOP_BACK")
+        if session["manifest"]:
+            back = layout.row()
+            back.scale_y = 1.6
+            back.operator(BB_OT_return_to_scene.bl_idname, icon="LOOP_BACK")
         layout.label(text="Ctrl+S saves the model and regenerates the .glb", icon="CHECKMARK")
         column = layout.column(align=True)
         column.label(text="Export: %s" % session["asset"].replace("res://", "", 1))
-        column.label(text="The surrounding scene is only for reference and isn't saved.")
+        if session["manifest"]:
+            column.label(text="The surrounding scene is only for reference and isn't saved.")
+        else:
+            column.label(text="Opened from Godot without a scene.")
 
         collection = bridge.session_collection(session)
-        exporter = bridge.gltf_exporter(collection) if collection is not None else None
-        if exporter is None:
+        if collection is None:
             return
         box = layout.box()
-        box.label(text="Export settings", icon="SETTINGS")
-        _draw_export_options(box, exporter.export_properties)
-        row = box.row(align=True)
-        row.operator(BB_OT_export_now.bl_idname, icon="EXPORT")
-        row.operator(BB_OT_reset_export.bl_idname, icon="LOOP_BACK")
-        box.label(text="Saved with the model; other options in Collection › Exporters.", icon="INFO")
+        box.label(text="Export settings (saved with the model)", icon="SETTINGS")
+        # Blender's own Collection Exporters UI; it shows the active collection's exporters.
+        if context.collection != collection:
+            box.operator(BB_OT_show_export_settings.bl_idname, icon="PREFERENCES")
+            return
+        box.template_collection_exporters()
+        box.operator(BB_OT_reset_export.bl_idname, icon="LOOP_BACK")
 
 
 class BB_PT_detail(bpy.types.Panel):
@@ -553,7 +676,7 @@ class BB_PT_detail(bpy.types.Panel):
             if choice == "personal":
                 note = layout.column(align=True)
                 note.alert = True
-                note.label(text="Source is outside the project, only for you.", icon="ERROR")
+                note.label(text="Source is outside the project and the models folder, only for you.", icon="ERROR")
                 note.label(text="Others on the team don't have it.")
             if choice:
                 layout.operator(BB_OT_clear_source.bl_idname, icon="X").name = obj.name
@@ -579,14 +702,23 @@ _CLASSES = (
     BB_OT_edit_source,
     BB_OT_choose_source,
     BB_OT_clear_source,
+    BB_OT_set_models_folder,
     BB_OT_select_model,
+    BB_MT_model_pie,
+    BB_OT_model_pie,
+    BB_OT_open_source,
     BB_OT_return_to_scene,
-    BB_OT_export_now,
+    BB_OT_show_export_settings,
     BB_OT_reset_export,
     BB_Preferences,
     BB_PT_panel,
     BB_PT_detail,
 )
+
+
+# Tab on a model: Blenderang's menu instead of Blender's "linked data" one, whose
+# Open skips everything Edit does. Elsewhere the poll fails and Tab works as usual.
+_KEYMAPS: list[tuple[bpy.types.KeyMap, bpy.types.KeyMapItem]] = []
 
 
 def register() -> None:
@@ -600,9 +732,16 @@ def register() -> None:
     )
     for handlers, callback in _HANDLERS:
         handlers.append(callback)
+    keyconfig = bpy.context.window_manager.keyconfigs.addon
+    if keyconfig is not None:   # None in background mode
+        keymap = keyconfig.keymaps.new(name="Object Mode", space_type="EMPTY")
+        _KEYMAPS.append((keymap, keymap.keymap_items.new(BB_OT_model_pie.bl_idname, "TAB", "PRESS")))
 
 
 def unregister() -> None:
+    for keymap, item in _KEYMAPS:
+        keymap.keymap_items.remove(item)
+    _KEYMAPS.clear()
     del bpy.types.Scene.bb_model_filter
     for handlers, callback in _HANDLERS:
         if callback in handlers:

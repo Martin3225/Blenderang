@@ -2,6 +2,7 @@
 
 import math
 import os
+import shutil
 
 import bpy
 
@@ -340,6 +341,99 @@ class ChooseSourceTest(BridgeCase):
         scene = self.open_scene()
         with self.assertRaises(bridge.BridgeError):
             bridge.choose_source(scene, self.CRATE, os.path.join(harness.ASSETS, "crate.glb"))
+
+
+class ModelsFolderTest(BridgeCase):
+    """Sources in a shared folder outside the project, at a different place on every disk."""
+
+    CRATE = "res://fixtures/assets/crate.glb"
+
+    def library(self) -> str:
+        folder = os.path.join(os.path.dirname(harness.PROJECT), "models_library")
+        os.makedirs(folder, exist_ok=True)
+        self.addCleanup(shutil.rmtree, folder, True)
+        return folder
+
+    def library_source(self, folder: str, relative: str, collection: str = "crate") -> str:
+        path = os.path.join(folder, *relative.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        write_source(os.path.relpath(path, harness.ASSETS), collection)
+        return path
+
+    def test_source_is_found_by_name(self):
+        folder = self.library()
+        self.library_source(folder, "props/Crate.blend")
+        self.library_source(folder, ".git/crate.blend")
+        scene = self.open_scene()
+        self.assertEqual(bpy.data.objects["Crate"].get(bridge.P_TIER), "none", "no folder set yet")
+        bridge.set_models_folder(scene, folder)
+        crate = bpy.data.objects["Crate"]
+        self.assertEqual(crate.get(bridge.P_SRC_BLEND), "models://props/Crate.blend")
+        self.assertIsNotNone(crate.instance_collection.library)
+        self.assertEqual(bpy.data.objects["Tower"].get(bridge.P_TIER), "none", "no tower.blend in the folder")
+        self.assertEqual(dict(bridge.describe(crate)[1])["Source"], "props/Crate.blend (models folder)")
+        bpy.ops.bb.rebuild()
+        self.assertEqual(bpy.data.objects["Crate"].get(bridge.P_SRC_BLEND), "models://props/Crate.blend", "kept after rebuild")
+        self.assertEqual(list(bpy.context.scene[bridge.S_WARNINGS]), [])
+
+    def test_sibling_wins_and_mirrored_path_breaks_ties(self):
+        folder = self.library()
+        self.library_source(folder, "a/crate.blend")
+        self.library_source(folder, "fixtures/assets/crate.blend")
+        scene = self.open_scene()
+        bridge.set_models_folder(scene, folder)
+        self.assertEqual(bpy.data.objects["Crate"].get(bridge.P_SRC_BLEND), "models://fixtures/assets/crate.blend")
+        write_source("crate.blend", "crate")
+        bpy.ops.bb.rebuild()
+        self.assertEqual(bpy.data.objects["Crate"].get(bridge.P_SRC_BLEND), "fixtures/assets/crate.blend")
+
+    def test_ambiguous_name_warns(self):
+        folder = self.library()
+        self.library_source(folder, "b/crate.blend")
+        self.library_source(folder, "a/crate.blend")
+        scene = self.open_scene()
+        bridge.set_models_folder(scene, folder)
+        bpy.ops.bb.rebuild()
+        self.assertEqual(bpy.data.objects["Crate"].get(bridge.P_SRC_BLEND), "models://a/crate.blend")
+        warnings = list(bpy.context.scene[bridge.S_WARNINGS])
+        self.assertEqual(len(warnings), 1, warnings)
+        self.assertIn("a/crate.blend", warnings[0])
+
+    def test_picked_source_in_folder_is_shared_relative(self):
+        folder = self.library()
+        source = self.library_source(folder, "props/crate_v2.blend")
+        scene = self.open_scene()
+        bridge.set_models_folder(scene, folder)
+        self.assertEqual(bridge.choose_source(scene, self.CRATE, source), ("models://props/crate_v2.blend", False))
+        with open(os.path.join(harness.ASSETS, "crate.glb.bbsrc"), encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), "models://props/crate_v2.blend", "no absolute path in the shared file")
+        self.assertEqual(bridge.local_sources(harness.PROJECT), {})
+
+        # Someone else keeps the folder elsewhere: the same .bbsrc works for them.
+        moved = os.path.join(os.path.dirname(harness.PROJECT), "models_elsewhere")
+        shutil.move(folder, moved)
+        self.addCleanup(shutil.rmtree, moved, True)
+        bridge.set_models_folder(scene, moved)
+        crate = bpy.data.objects["Crate"]
+        self.assertEqual(crate.get(bridge.P_SRC_BLEND), "models://props/crate_v2.blend")
+        self.assertTrue(bridge._same_file(bpy.path.abspath(crate.instance_collection.library.filepath),
+                                          os.path.join(moved, "props", "crate_v2.blend")))
+
+        # Without the folder set the model falls back to the .glb preview.
+        bridge.set_models_folder(scene, "")
+        self.assertEqual(bpy.data.objects["Crate"].get(bridge.P_TIER), "none")
+
+    def test_make_source_goes_to_folder_and_edits_there(self):
+        folder = self.library()
+        scene = self.open_scene()
+        bridge.set_models_folder(scene, folder)
+        self.assertEqual(bpy.ops.bb.promote_source(name="Tower"), {"FINISHED"})
+        created = os.path.join(folder, "fixtures", "assets", "tower.blend")
+        self.assertTrue(os.path.isfile(created))
+        self.assertFalse(os.path.exists(os.path.join(harness.ASSETS, "tower.blend")), "nothing new in the game project")
+        self.assertEqual(bpy.data.objects["Tower"].get(bridge.P_SRC_BLEND), "models://fixtures/assets/tower.blend")
+        self.assertEqual(bpy.ops.bb.edit_source(name="Tower"), {"FINISHED"})
+        self.assertTrue(bridge._same_file(bpy.data.filepath, created))
 
 
 class TerrainMaterialTest(BridgeCase):

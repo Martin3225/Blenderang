@@ -1,0 +1,37 @@
+name: Release
+
+# Pushing a tag vX.Y.Z builds both zips and attaches them to the GitHub release
+# of that tag (created if it doesn't exist yet).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build zips
+        run: python tools/build_release.py --tag "$GITHUB_REF_NAME"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/*.zip --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/*.zip \
+              --title "Blenderang $version" \
+              --notes "Godot plugin: \`blenderang-godot-$version.zip\` (or the Asset Library). Blender extension: \`blenderang-blender-$version.zip\`, install with Install from Disk." \
+              --generate-notes
+          fi

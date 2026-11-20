@@ -10,6 +10,12 @@ extends RefCounted
 ## (one .blend exports several assets, or the scene layout holds the source of truth),
 ## the exact path is written to a [code]<asset>.bbsrc[/code] file next to the asset.
 ##
+## Sources can also live in a [b]models folder[/b] outside the project (e.g. a separate
+## git repository the team shares). Each person sets where it is on their disk
+## ([code].pipeline/local/settings.json[/code]); shared paths into it are written
+## as [code]models://<path inside the folder>[/code], so they are the same for everyone.
+## Without an exact path, the folder is searched for [code]<asset name>.blend[/code].
+##
 ## Godot has .blend import turned off in [code]project.godot[/code]
 ## ([code]filesystem/import/blender/enabled=false[/code]), so source
 ## files can live anywhere in the project without anyone who lacks Blender
@@ -20,19 +26,28 @@ extends RefCounted
 
 const OVERRIDE_EXTENSION: String = "bbsrc"
 const SOURCE_EXTENSION: String = "blend"
+const MODELS_PREFIX: String = "models://"
 
 ## Personal choice of sources outside the project. The folder has its own .gitignore with "*",
 ## so it's never committed and the team's .gitignore doesn't need touching.
 const LOCAL_DIR: String = "res://.pipeline/local"
 const LOCAL_SOURCES: String = "res://.pipeline/local/sources.json"
+## Personal settings: where the models folder is on this disk.
+const LOCAL_SETTINGS: String = "res://.pipeline/local/settings.json"
+
+## [code].blend[/code] files in the models folder by lowercase name; built once
+## per manifest export (see [method forget_models_index]).
+static var _models_index: Dictionary = {}
+static var _models_index_folder: String = ""
 
 
 ## Path to the source [code].blend[/code]: relative to the project root
-## (Blender doesn't know [code]res://[/code]), or absolute for a personal source
-## outside the project. An empty string means there is no source.
+## (Blender doesn't know [code]res://[/code]), [code]models://…[/code] inside the
+## models folder, or absolute for a personal source outside both. An empty string
+## means there is no source. [method absolute_source] turns it into a file path.
 ##
 ## Order: personal choice (only for you) → [code].bbsrc[/code] (shared) →
-## [code].blend[/code] next to the asset.
+## [code].blend[/code] next to the asset → [code]<name>.blend[/code] in the models folder.
 static func source_for(asset_path: String) -> String:
 	if asset_path.is_empty():
 		return ""
@@ -42,7 +57,22 @@ static func source_for(asset_path: String) -> String:
 	var candidate: String = read_override(asset_path)
 	if candidate.is_empty():
 		candidate = expected_source_for(asset_path)
-	return candidate if FileAccess.file_exists("res://" + candidate) else ""
+		if not FileAccess.file_exists("res://" + candidate):
+			candidate = find_in_models_folder(asset_path)
+	if candidate.is_empty():
+		return ""
+	return candidate if FileAccess.file_exists(absolute_source(candidate)) else ""
+
+
+## File path of a source as [method source_for] returns it. A [code]models://[/code]
+## path without a models folder set resolves to an empty string.
+static func absolute_source(source: String) -> String:
+	if source.begins_with(MODELS_PREFIX):
+		var folder: String = models_folder()
+		return "" if folder.is_empty() else folder.path_join(source.trim_prefix(MODELS_PREFIX))
+	if source.is_absolute_path():
+		return source
+	return ProjectSettings.globalize_path("res://" + source)
 
 
 ## Is the file inside the project? Only such a path can be shared via [code].bbsrc[/code].
@@ -50,8 +80,19 @@ static func is_inside_project(absolute_path: String) -> bool:
 	return ProjectSettings.localize_path(absolute_path).begins_with("res://")
 
 
-## Sets the chosen file as the asset's source. Inside the project → shared
-## [code].bbsrc[/code] (and clears any personal choice); outside the project →
+## [code]models://…[/code] for a file inside the models folder, otherwise empty.
+static func to_models_path(absolute_path: String) -> String:
+	var folder: String = models_folder()
+	if folder.is_empty():
+		return ""
+	var path: String = absolute_path.replace("\\", "/").simplify_path()
+	var inside: bool = path.to_lower().begins_with(folder.to_lower() + "/") if OS.get_name() == "Windows" \
+			else path.begins_with(folder + "/")
+	return MODELS_PREFIX + path.substr(folder.length() + 1) if inside else ""
+
+
+## Sets the chosen file as the asset's source. Inside the project or the models
+## folder → shared [code].bbsrc[/code] (and clears any personal choice); elsewhere →
 ## a personal entry others won't see. Returns [code]true[/code] for a personal one.
 static func choose_source(asset_path: String, absolute_path: String) -> bool:
 	if is_inside_project(absolute_path):
@@ -59,41 +100,116 @@ static func choose_source(asset_path: String, absolute_path: String) -> bool:
 		write_override(asset_path, "" if relative == expected_source_for(asset_path) else relative)
 		write_local(asset_path, "")
 		return false
+	var shared: String = to_models_path(absolute_path)
+	if not shared.is_empty():
+		write_override(asset_path, shared)
+		write_local(asset_path, "")
+		return false
 	write_local(asset_path, absolute_path)
 	return true
 
 
 static func read_local(asset_path: String) -> String:
-	return str(_local_sources().get(asset_path, ""))
+	return str(_read_json(LOCAL_SOURCES).get(asset_path, ""))
 
 
 ## Writes a personal source (absolute path). An empty path deletes the entry.
 static func write_local(asset_path: String, absolute_path: String) -> bool:
-	var sources: Dictionary = _local_sources()
+	var sources: Dictionary = _read_json(LOCAL_SOURCES)
 	if absolute_path.is_empty():
 		sources.erase(asset_path)
 	else:
 		sources[asset_path] = absolute_path
+	return _write_local_json(LOCAL_SOURCES, sources)
+
+
+## Absolute path of the models folder on this disk (forward slashes), or empty when not set.
+static func models_folder() -> String:
+	var folder: String = str(_read_json(LOCAL_SETTINGS).get("models_folder", ""))
+	return folder.replace("\\", "/").simplify_path().trim_suffix("/") if not folder.is_empty() else ""
+
+
+## Sets where the models folder is on this disk. An empty path unsets it.
+static func set_models_folder(absolute_path: String) -> bool:
+	var settings: Dictionary = _read_json(LOCAL_SETTINGS)
+	if absolute_path.is_empty():
+		settings.erase("models_folder")
+	else:
+		settings["models_folder"] = absolute_path.simplify_path()
+	forget_models_index()
+	return _write_local_json(LOCAL_SETTINGS, settings)
+
+
+## [code]models://…[/code] path of [code]<asset name>.blend[/code] in the models folder,
+## or empty. The name is matched case-insensitively at any depth. With several
+## matches the one at the asset's own path ([code]levels/castle/castle.blend[/code])
+## wins, otherwise the first alphabetically; pick the source by hand to be explicit.
+static func find_in_models_folder(asset_path: String) -> String:
+	var folder: String = models_folder()
+	if folder.is_empty():
+		return ""
+	if folder != _models_index_folder:
+		_models_index = _index_models(folder)
+		_models_index_folder = folder
+	var matches: Array = _models_index.get(expected_source_for(asset_path).get_file().to_lower(), [])
+	if matches.is_empty():
+		return ""
+	var mirrored: String = expected_source_for(asset_path)
+	if matches.has(mirrored):
+		return MODELS_PREFIX + mirrored
+	if matches.size() > 1:
+		push_warning("Blenderang: several %s in the models folder, using %s; pick the source to choose another." % [mirrored.get_file(), matches[0]])
+	return MODELS_PREFIX + str(matches[0])
+
+
+## Drops the cached listing of the models folder; the next lookup scans it again.
+static func forget_models_index() -> void:
+	_models_index = {}
+	_models_index_folder = ""
+
+
+## Lowercase file name → sorted relative paths. Hidden folders (.git) are skipped.
+static func _index_models(folder: String) -> Dictionary:
+	var index: Dictionary = {}
+	var pending: Array[String] = [""]
+	while not pending.is_empty():
+		var relative: String = pending.pop_back()
+		var directory: String = folder.path_join(relative)
+		for name: String in DirAccess.get_directories_at(directory):
+			if not name.begins_with("."):
+				pending.push_back(relative.path_join(name))
+		for name: String in DirAccess.get_files_at(directory):
+			if name.get_extension().to_lower() == SOURCE_EXTENSION:
+				var key: String = name.to_lower()
+				if not index.has(key):
+					index[key] = []
+				index[key].append(relative.path_join(name))
+	for key: String in index:
+		index[key].sort()
+	return index
+
+
+static func _read_json(path: String) -> Dictionary:
+	if not FileAccess.file_exists(path):
+		return {}
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+	return parsed if parsed is Dictionary else {}
+
+
+static func _write_local_json(path: String, data: Dictionary) -> bool:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(LOCAL_DIR))
 	var ignore: String = LOCAL_DIR + "/.gitignore"
 	if not FileAccess.file_exists(ignore):
 		var marker: FileAccess = FileAccess.open(ignore, FileAccess.WRITE)
 		marker.store_string("*\n")
 		marker.close()
-	var file: FileAccess = FileAccess.open(LOCAL_SOURCES, FileAccess.WRITE)
+	var file: FileAccess = FileAccess.open(path, FileAccess.WRITE)
 	if file == null:
-		push_error("Blenderang: cannot write %s" % LOCAL_SOURCES)
+		push_error("Blenderang: cannot write %s" % path)
 		return false
-	file.store_string(JSON.stringify(sources, "\t"))
+	file.store_string(JSON.stringify(data, "\t"))
 	file.close()
 	return true
-
-
-static func _local_sources() -> Dictionary:
-	if not FileAccess.file_exists(LOCAL_SOURCES):
-		return {}
-	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(LOCAL_SOURCES))
-	return parsed if parsed is Dictionary else {}
 
 
 ## Path where the source is expected even if it isn't there yet: next to the asset,
@@ -145,4 +261,8 @@ static func write_override(asset_path: String, blend_path: String) -> bool:
 ## The scene itself has no .blend: the layout is always in the [code].tscn[/code]
 ## and Blender builds it from the manifest each time.
 static func tier_for(asset_path: String) -> String:
-	return "none" if source_for(asset_path).is_empty() else "library"
+	return tier_of(source_for(asset_path))
+
+
+static func tier_of(source: String) -> String:
+	return "none" if source.is_empty() else "library"

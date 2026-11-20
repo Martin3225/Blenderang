@@ -73,8 +73,9 @@ extension**. You need both.
 **From the Asset Library (easiest):** in Godot open the **AssetLib** tab,
 search for *Blenderang*, click **Download**, then **Install**.
 
-**Manually:** download the latest release, copy `addons/blenderang/` into your
-project's `addons/` folder.
+**Manually:** download `blenderang-godot-x.y.z.zip` from the
+[latest release](https://github.com/Martin3225/Blenderang/releases/latest) and
+unzip it into your project's root folder (it contains `addons/blenderang/`).
 
 Then:
 
@@ -98,7 +99,7 @@ Then:
 
 ### 2. Blender extension
 
-1. Download `blenderang-x.y.z.zip` from the
+1. Download `blenderang-blender-x.y.z.zip` from the
    [latest release](https://github.com/Martin3225/Blenderang/releases/latest).
 2. In Blender: `Edit ▸ Preferences ▸ Get Extensions ▸ ⌄ ▸ Install from Disk…`
    and pick the zip. Don't unzip it.
@@ -126,8 +127,8 @@ ln -sfn "$PWD/tools/blenderang" ~/.var/app/org.blender.Blender/config/blender/5.
 Then in Blender: `Edit ▸ Preferences ▸ Add-ons ▸ ⌄ ▸ Refresh Local` and
 enable **Blenderang**.
 
-To build the zip yourself:
-`blender --command extension build --source-dir tools/blenderang`
+To build both release zips yourself: `python tools/build_release.py`
+(writes them to `dist/`).
 
 </details>
 
@@ -153,15 +154,27 @@ A five-minute tour: move a prop, then edit its model.
 
 1. In the Blenderang panel, find the model in the **Models** list (the search
    box matches the name, the node path and the asset file).
-2. If it says **Make source**, click it once. This creates `model.blend` next
-   to `model.glb`, ready for editing.
-3. Click **Edit**. The model's `.blend` opens with the rest of the level
-   around it as locked context, so you can see how it fits.
+2. If it says **Pick source**, the model has no `.blend` yet. Pick an existing
+   one, or select the model, press `Tab` and choose **Make source**: this
+   creates `model.blend` next to `model.glb` (or in the models folder, see
+   below), ready for editing.
+3. Click **Edit** (or `Tab` ▸ **Edit model**). The model's `.blend` opens with
+   the rest of the level around it as locked context, so you can see how it fits.
 4. Change the model, then press `Ctrl+S`. The `.blend` is saved and the `.glb`
    is re-exported. Godot reimports it on its own.
 5. Click **Save and return to scene** to go back to the layout.
 
 That's it.
+
+To edit a model without a scene, right-click its `.glb` / `.fbx` in Godot's
+FileSystem dock and choose **Open source in Blender**. `Ctrl+S` there
+re-exports the asset into your project the same way.
+
+The source-to-asset binding is kept in your Blender user configuration even
+after **Save and return to scene**. Reopening that `.blend` by hand with
+Blenderang enabled still re-exports on `Ctrl+S`, without restoring the old
+scene context. The binding is local to your machine, not stored in the shared
+`.blend`.
 
 ## How it works
 
@@ -199,22 +212,58 @@ levels/castle/castle.glb     ← used by the game
 levels/castle/castle.blend   ← source for editing
 ```
 
+#### Shared models folder
+
+If your team keeps the source `.blend` files in their own folder outside the
+game project (for example a separate git repository), tell Blenderang where
+that folder is on your disk:
+
+- in Godot: `Project ▸ Tools ▸ Blenderang ▸ Set models folder…`
+- in Blender: **Models folder** at the bottom of the Blenderang panel
+
+Everyone can keep the folder somewhere else; the location is saved only for
+you (`.pipeline/local/settings.json`). When a model has no `.blend` next to its
+asset, Blenderang searches the folder for `<asset name>.blend` at any depth
+(case-insensitive, hidden folders like `.git` skipped). If several files have
+that name, the one at the asset's own path wins
+(`<models folder>/levels/castle/castle.blend` for `res://levels/castle/castle.glb`),
+otherwise the first alphabetically, and Blender warns about it.
+
+With a models folder set, **Make source** creates the new `.blend` in it, at
+the asset's own path, instead of next to the asset in the game project.
+
+#### Picking a source by hand
+
 If your source is somewhere else, or one `.blend` holds several models, pick
-it by hand with **Detail ▸ Pick source…** in Blender or
-`Project ▸ Tools ▸ Blenderang ▸ Pick source .blend for selection…` in Godot.
+it by hand with **Pick source** in Blender (model list, **Detail** or `Tab` on
+the model) or `Project ▸ Tools ▸ Blenderang ▸ Pick source .blend for
+selection…` in Godot. The file browser starts in the models folder when one is set.
 
 | where the picked `.blend` is | stored in | who sees it |
 |---|---|---|
 | inside the project | `<asset>.bbsrc` next to the asset | everyone, via git |
-| outside the project | `.pipeline/local/sources.json` | only you |
+| inside the models folder | `<asset>.bbsrc` as `models://<path in the folder>` | everyone who has the folder set |
+| anywhere else | `.pipeline/local/sources.json` | only you |
+
+The order is: your personal pick, then `<asset>.bbsrc`, then the `.blend` next
+to the asset, then the name search in the models folder.
 
 ### Export settings
 
-When you edit a model, the panel shows **Export settings** for its `.glb`:
-apply modifiers, +Y up, materials, image format, animation, skinning, shape
-keys, tangents, custom properties and Draco compression. They're saved inside
-the source `.blend`. **Export now** re-exports without saving. Defaults for
-new sources are in `Preferences ▸ Add-ons ▸ Blenderang`.
+Each source exports with Blender's own glTF **Collection Exporter**: the
+collection named after the asset (`crate` for `crate.glb`) is written to the
+asset's path. When you edit a model, the panel shows that exporter with all of
+Blender's glTF options (the same as `Properties ▸ Collection ▸ Exporters`),
+including **Export All** to re-export without saving. The settings are saved
+inside the source `.blend`; Blenderang only keeps the file path pointing at the
+asset. New sources start with the defaults from
+`Preferences ▸ Add-ons ▸ Blenderang` (apply modifiers, +Y up, …), and
+**Reset to defaults** applies them again.
+
+Helper objects that shouldn't end up in the `.glb` (boolean cutters, guides)
+go in a separate collection *next to* the asset collection, not inside it.
+Modifiers still use them, and they don't show up when the model is linked
+into a scene.
 
 > **Shape keys:** glTF export drops shape keys on meshes that have
 > modifiers when *Apply modifiers* is on. Turn it off for that model if you
@@ -280,6 +329,18 @@ You need Python 3, Godot and Blender (on `PATH`, in `$GODOT` / `$BLENDER`, or
 passed with `--godot` / `--blender`). On Linux the GUI suite needs `Xvfb`.
 Tests run in an isolated copy under `tests/.work` with their own Godot and
 Blender config, so they never touch your settings or your game project.
+
+## Releasing
+
+1. Set the same version in `addons/blenderang/plugin.cfg` and
+   `tools/blenderang/blender_manifest.toml`.
+2. Commit, tag and push: `git tag vX.Y.Z && git push github main vX.Y.Z`.
+
+The [Release workflow](.github/workflows/release.yml) builds
+`blenderang-godot-X.Y.Z.zip` and `blenderang-blender-X.Y.Z.zip` and attaches
+both to the GitHub release of the tag. It fails if the tag and the two
+versions don't match. The Asset Library serves the tagged repository itself;
+`.gitattributes` keeps the tests and the Blender extension out of that download.
 
 ## Contributing
 
