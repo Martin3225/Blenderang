@@ -34,7 +34,7 @@ func _run() -> void:
 	_record("manifest written", manifest == "res://.pipeline/basic.json", manifest)
 
 	_write(out.path_join("startup_expr.py"),
-		BBLauncher.startup_expression(ProjectSettings.globalize_path(manifest)))
+		BBLauncher.python_args(BBLauncher.startup_expression(ProjectSettings.globalize_path(manifest)))[1])
 	_write(out.path_join("e2e_before.json"), JSON.stringify(E2E.snapshot(root), "\t"))
 	_write(out.path_join("e2e_prepare.json"), JSON.stringify(_results, "\t"))
 	quit(0)

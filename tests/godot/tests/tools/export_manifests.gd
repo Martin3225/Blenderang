@@ -25,13 +25,13 @@ func _run() -> void:
 	helper._finish()
 	# Startup Python exactly as the plugin passes it to Blender.
 	var file: FileAccess = FileAccess.open("res://.pipeline/startup_expr.py", FileAccess.WRITE)
-	file.store_string(BBLauncher.startup_expression(ProjectSettings.globalize_path("res://.pipeline/basic.json")))
+	file.store_string(BBLauncher.python_args(BBLauncher.startup_expression(ProjectSettings.globalize_path("res://.pipeline/basic.json")))[1])
 	file.close()
 	# "Open source in Blender" for crate.glb with a source next to it.
 	file = FileAccess.open("res://.pipeline/source_expr.py", FileAccess.WRITE)
-	file.store_string(BBLauncher.source_expression(
+	file.store_string(BBLauncher.python_args(BBLauncher.source_expression(
 		ProjectSettings.globalize_path("res://fixtures/assets/crate.blend"),
 		"res://fixtures/assets/crate.glb",
-		ProjectSettings.globalize_path("res://").trim_suffix("/")))
+		ProjectSettings.globalize_path("res://").trim_suffix("/")))[1])
 	file.close()
 	quit(0)

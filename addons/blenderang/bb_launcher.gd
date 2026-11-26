@@ -65,5 +65,17 @@ static func _launch(expression: String) -> Error:
 			% executable
 		)
 		return ERR_FILE_NOT_FOUND
-	var pid: int = OS.create_process(executable, ["--python-expr", expression])
+	var pid: int = OS.create_process(executable, python_args(expression))
 	return OK if pid > 0 else FAILED
+
+
+## Blender arguments that run [param expression].
+## On Windows [method OS.create_process] builds one command line and wraps an
+## argument containing spaces in quotes without escaping the quotes and
+## backslashes inside it, so the expression (JSON strings, Windows paths,
+## newlines) would reach Blender cut apart. Base64 contains none of those.
+static func python_args(expression: String) -> PackedStringArray:
+	return PackedStringArray([
+		"--python-expr",
+		"import base64; exec(base64.b64decode('%s').decode('utf-8'))" % Marshalls.utf8_to_base64(expression),
+	])

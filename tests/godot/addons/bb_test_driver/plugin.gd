@@ -243,6 +243,8 @@ func _history(root: Node) -> UndoRedo:
 	return manager.get_history_undo_redo(manager.get_object_history_id(root))
 
 
+## Arguments the fake Blender received; the base64 expression is decoded so
+## tests check the real Python.
 func _fake_blender_args() -> PackedStringArray:
 	var record: String = OS.get_environment("BB_TEST_OUT").path_join("fake_blender_args.txt")
 	for _attempt: int in 300:
@@ -250,8 +252,13 @@ func _fake_blender_args() -> PackedStringArray:
 			await get_tree().create_timer(0.2).timeout
 			var lines: PackedStringArray = FileAccess.get_file_as_string(record).strip_edges().split("\n")
 			DirAccess.remove_absolute(record)
-			# The Python expression is multi-line; the first line is the switch, the rest the expression.
-			return PackedStringArray([lines[0], "\n".join(lines.slice(1))]) if lines.size() > 1 else lines
+			if lines.size() != 2:
+				return lines
+			# Windows passes the argument intact only without quotes and backslashes.
+			_record("Blender argument survives Windows command-line quoting",
+				not lines[1].contains("\"") and not lines[1].contains("\\") and not lines[1].contains("\n"), lines[1])
+			var encoded := RegEx.create_from_string("b64decode\\('([A-Za-z0-9+/=]*)'\\)").search(lines[1])
+			return PackedStringArray([lines[0], Marshalls.base64_to_utf8(encoded.get_string(1)) if encoded else lines[1]])
 		await get_tree().create_timer(0.05).timeout
 	return PackedStringArray()
 
