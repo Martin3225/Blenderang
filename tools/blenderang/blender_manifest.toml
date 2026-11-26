@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "blenderang"
-version = "0.2.0"
+version = "0.3.0"
 name = "Blenderang"
 tagline = "Round-trip Godot scenes through Blender"
 maintainer = "Martin Vacek"
