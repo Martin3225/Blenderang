@@ -657,10 +657,10 @@ def gltf_exporter(collection: bpy.types.Collection) -> bpy.types.CollectionExpor
 def set_export_target(collection: bpy.types.Collection, target: str, root: str,
                       blend_path: str = "") -> bpy.types.CollectionExport:
     """Points the collection's glTF exporter at the file, adding one with Blender's
-    defaults when it has none. The path is relative to ``blend_path`` (default:
-    the open file). Inside the project the ``res://`` path and the project's name
-    are kept on the collection too, so the .blend exports to the right place on
-    every disk."""
+    defaults (and *Apply modifiers* on) when it has none. The path is relative to
+    ``blend_path`` (default: the open file). Inside the project the ``res://`` path
+    and the project's name are kept on the collection too, so the .blend exports
+    to the right place on every disk."""
     exporter = gltf_exporter(collection)
     if exporter is None:
         with bpy.context.temp_override(collection=collection):
@@ -671,8 +671,25 @@ def set_export_target(collection: bpy.types.Collection, target: str, root: str,
     props = exporter.export_properties
     if hasattr(props, "export_format"):
         props.export_format = "GLTF_SEPARATE" if target.lower().endswith(".gltf") else "GLB"
+    _apply_modifiers_by_default(exporter)
     _share_target(collection, _relative_inside(target, root) if root else "", root)
     return exporter
+
+
+def _apply_modifiers_by_default(exporter: bpy.types.CollectionExport) -> None:
+    """*Apply modifiers* on, so booleans and other modifiers end up in the .glb.
+    Only while nobody set it: switched off by hand (shape keys), it stays off."""
+    props = exporter.export_properties
+    if hasattr(props, "export_apply") and not props.is_property_set("export_apply"):
+        props.export_apply = True
+
+
+def apply_modifiers_by_default() -> None:
+    """``_apply_modifiers_by_default`` for every exporter of the open file's models,
+    including ones added in Blender's own Collection Exporters UI."""
+    for collection in model_collections():
+        for exporter in collection.exporters:
+            _apply_modifiers_by_default(exporter)
 
 
 def _share_target(collection: bpy.types.Collection, inside: str, root: str) -> None:
@@ -816,19 +833,36 @@ def follow_moved_assets(root: str) -> list[str]:
 
 def sync_export_paths(root: str, blend_path: str = "") -> None:
     """Before saving or exporting: follow assets moved in Godot, take paths typed
-    into the exporters, record Godot's uids, and point the exporters at the
-    project on this disk relative to ``blend_path`` (default: the open file)."""
+    into the exporters, record Godot's uids, point the exporters at the project
+    on this disk relative to ``blend_path`` (default: the open file), and turn
+    *Apply modifiers* on for exporters added since."""
     follow_moved_assets(root)
     remember_export_paths(root)
     remember_asset_uids(root)
     localize_export_paths(root, blend_path)
+    apply_modifiers_by_default()
 
 
 def export_collection(collection: bpy.types.Collection) -> None:
     """Runs all exporters of the collection. ``wm.collection_export_all`` isn't
-    enough; it only exports collections that are in the view layer."""
-    with bpy.context.temp_override(collection=collection):
-        bpy.ops.collection.export_all()
+    enough; it only exports collections that are in the view layer.
+
+    The exporters read evaluated objects. A model outside the view layer (not in
+    the scene or excluded: the other models of a .blend while one is edited) would
+    export empty or without its modifiers, so it's exported from a temporary scene
+    of its own instead."""
+    in_view_layer = set(bpy.context.view_layer.objects)
+    if all(obj in in_view_layer for obj in collection.all_objects):
+        with bpy.context.temp_override(collection=collection):
+            bpy.ops.collection.export_all()
+        return
+    scene = bpy.data.scenes.new("BB_Export")
+    try:
+        scene.collection.children.link(collection)
+        with bpy.context.temp_override(scene=scene, view_layer=scene.view_layers[0], collection=collection):
+            bpy.ops.collection.export_all()
+    finally:
+        bpy.data.scenes.remove(scene)
 
 
 def export_models(root: str, on_save: bool = False) -> int:
@@ -907,9 +941,7 @@ def promote_to_library(obj: bpy.types.Object, root: str) -> str:
         raise BridgeError("%s already exists; pick it as the source" % target)
     os.makedirs(os.path.dirname(target), exist_ok=True)
     collection.pop(P_PREVIEW, None)
-    props = set_export_target(collection, asset_abs(root, asset_src), root, target).export_properties
-    if hasattr(props, "export_apply"):
-        props.export_apply = True   # booleans and other modifiers end up in the .glb
+    set_export_target(collection, asset_abs(root, asset_src), root, target)
     bpy.data.libraries.write(target, {collection}, fake_user=True)
     forget_models_index()
 
@@ -1201,9 +1233,8 @@ def link_file(scene: bpy.types.Scene, view_layer: bpy.types.ViewLayer, project: 
                 collection.objects.link(obj)
                 scene.collection.objects.unlink(obj)
             activate_collection(view_layer, collection)
-        props = set_export_target(collection, absolute, root).export_properties
-        if hasattr(props, "export_apply"):
-            props.export_apply = True
+        set_export_target(collection, absolute, root)
+    apply_modifiers_by_default()   # exporters added in Blender's UI before linking
     remember_export_paths(root)
     if not linked_models():
         raise BridgeError("the file's exporters don't write into the Godot project")
@@ -1332,9 +1363,9 @@ def activate_collection(view_layer: bpy.types.ViewLayer, collection: bpy.types.C
 
 
 def setup_session_exporter(session: dict[str, Any]) -> bpy.types.Collection | None:
-    """Makes sure the edited model exports to its asset: an exporter with Blender's
-    defaults for a source that has none, the asset's path for one exported elsewhere
-    (made on another disk before the path was shared). Other settings stay as they are."""
+    """Makes sure the edited model exports to its asset: an exporter for a source
+    that has none, the asset's path for one exported elsewhere (made on another
+    disk before the path was shared). Other settings stay as they are."""
     collection = session_collection(session)
     if collection is None:
         if session.get("asset"):

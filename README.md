@@ -346,8 +346,10 @@ The exporter's path is absolute and differs on every disk, so Blenderang also
 stores it on the collection as a `res://` path and points the exporter at the
 project wherever it lies on your disk when the file opens.
 
-**Make source** turns *Apply modifiers* on; a source you made by hand keeps
-Blender's defaults (it's off there), so switch it on if you use booleans.
+*Apply modifiers* is on for every exporter of a linked `.blend`, so booleans
+end up in the `.glb`: the ones Blenderang adds and the ones you add in Blender's
+Collection Exporters (switched on when the file opens or saves). Once you set it
+yourself, it stays as you set it.
 
 **Several models in one `.blend`:** give each its own collection with its own
 exporter. `Ctrl+S` exports all of them, and each asset in Godot links the

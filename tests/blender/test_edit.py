@@ -236,8 +236,8 @@ class SourceFromGodotTest(BridgeCase):
         self.assertEqual(bpy.context.view_layer.active_layer_collection.collection.name, "crate")
         collection = bpy.data.collections["crate"]
         self.assertEqual(collection[bridge.C_ASSET], "res://fixtures/assets/crate.glb", "found by name, exporter added")
-        self.assertFalse(bridge.gltf_exporter(collection).export_properties.export_apply,
-                         "a hand-made source keeps Blender's export defaults")
+        self.assertTrue(bridge.gltf_exporter(collection).export_properties.export_apply,
+                        "the exporter Blenderang adds applies modifiers")
 
         glb = os.path.join(harness.ASSETS, "crate.glb")
         before = os.stat(glb).st_mtime_ns
@@ -261,14 +261,22 @@ class SourceFromGodotTest(BridgeCase):
 class SeveralModelsTest(BridgeCase):
     """One .blend with several collections, each exporting its own asset."""
 
+    CRATE = "res://fixtures/assets/crate.glb"
+    TOWER = "res://fixtures/assets/tower.glb"
+
     def write_props(self) -> str:
+        """Box → crate.glb, Spire → tower.glb (an Array modifier on it), Cutters: a
+        helper collection without an exporter."""
         path = os.path.join(harness.ASSETS, "props.blend")
         collections = set()
         for name, asset in (("Box", "crate.glb"), ("Spire", "tower.glb"), ("Cutters", "")):
             mesh = bpy.data.meshes.new(name)
             mesh.from_pydata([(0, 0, 0), (1, 0, 0), (0, 1, 0)], [], [(0, 1, 2)])
             collection = bpy.data.collections.new(name)
-            collection.objects.link(bpy.data.objects.new(name + "_body", mesh))
+            body = bpy.data.objects.new(name + "_body", mesh)
+            collection.objects.link(body)
+            if name == "Spire":
+                body.modifiers.new("Array", "ARRAY").count = 3
             if asset:
                 bridge.set_export_target(collection, os.path.join(harness.ASSETS, asset), harness.PROJECT)
             collections.add(collection)
@@ -277,11 +285,19 @@ class SeveralModelsTest(BridgeCase):
             bpy.data.collections.remove(collection)
         return path
 
-    def test_each_asset_links_its_collection_and_save_exports_all(self):
+    def open_props(self) -> str:
+        """The scene with crate and tower both linked from props.blend."""
         scene = self.open_scene()
         source = self.write_props()
-        bridge.choose_source(scene, "res://fixtures/assets/crate.glb", source)
-        bridge.choose_source(scene, "res://fixtures/assets/tower.glb", source)
+        bridge.choose_source(scene, self.CRATE, source)
+        bridge.choose_source(scene, self.TOWER, source)
+        return source
+
+    def glbs(self) -> list[str]:
+        return [os.path.join(harness.ASSETS, name) for name in ("crate.glb", "tower.glb")]
+
+    def test_each_asset_links_its_collection_and_save_exports_all(self):
+        self.open_props()
         self.assertEqual(bpy.data.objects["Crate"].instance_collection.name, "Box")
         self.assertEqual(bpy.data.objects["Tower"].instance_collection.name, "Spire")
 
@@ -289,12 +305,108 @@ class SeveralModelsTest(BridgeCase):
         self.assertEqual(bpy.context.view_layer.active_layer_collection.collection.name, "Box")
         self.assertEqual(sorted(c.name for c in bridge.model_collections()), ["Box", "Spire"],
                          "a collection without an exporter is a helper, not a model")
-        glbs = [os.path.join(harness.ASSETS, name) for name in ("crate.glb", "tower.glb")]
-        before = [os.stat(glb).st_mtime_ns for glb in glbs]
+        before = [os.stat(glb).st_mtime_ns for glb in self.glbs()]
         time.sleep(0.05)
         bpy.ops.wm.save_mainfile()
-        for glb, stamp in zip(glbs, before):
+        for glb, stamp in zip(self.glbs(), before):
             self.assertGreater(os.stat(glb).st_mtime_ns, stamp, glb)
+
+    def test_each_glb_holds_only_its_own_collection(self):
+        self.open_props()
+        bpy.ops.bb.edit_source(name="Crate")
+        self.assertNotIn("Spire", bpy.context.scene.collection.children, "the other model isn't in the scene")
+        bpy.ops.wm.save_mainfile()
+        crate, tower = (glb_json(glb) for glb in self.glbs())
+        self.assertEqual([n["name"] for n in crate["nodes"]], ["Box_body"])
+        self.assertEqual([n["name"] for n in tower.get("nodes", [])], ["Spire_body"],
+                         "no other model, helper or scene context in the .glb")
+        self.assertEqual(glb_vertex_count(self.glbs()[1]), 9, "the Array modifier is applied outside the scene too")
+
+    def test_excluded_model_exports_whole(self):
+        self.open_props()
+        bpy.ops.bb.edit_source(name="Tower")
+        view_layer = bpy.context.view_layer
+        view_layer.active_layer_collection = view_layer.layer_collection
+        next(lc for lc in view_layer.layer_collection.children if lc.collection.name == "Spire").exclude = True
+        bpy.ops.wm.save_mainfile()
+        self.assertEqual([n["name"] for n in glb_json(self.glbs()[1]).get("nodes", [])], ["Spire_body"])
+        self.assertEqual(glb_vertex_count(self.glbs()[1]), 9)
+
+    def test_both_sources_point_godot_at_the_shared_file(self):
+        self.open_props()
+        for asset in (self.CRATE, self.TOWER):
+            self.assertEqual(bridge.source_of({"src": asset}, harness.PROJECT), "fixtures/assets/props.blend", asset)
+
+    def test_auto_save_off_skips_all_and_export_now_exports_all(self):
+        self.open_props()
+        bpy.ops.bb.edit_source(name="Crate")
+        self.assertEqual(bpy.ops.bb.auto_export(enable=False), {"FINISHED"})
+        before = [os.stat(glb).st_mtime_ns for glb in self.glbs()]
+        time.sleep(0.05)
+        bpy.ops.wm.save_mainfile()
+        self.assertEqual([os.stat(glb).st_mtime_ns for glb in self.glbs()], before, "no model exports on save")
+        self.assertEqual(bpy.ops.bb.export_now(), {"FINISHED"})
+        for glb, stamp in zip(self.glbs(), before):
+            self.assertGreater(os.stat(glb).st_mtime_ns, stamp, glb)
+
+    def test_return_relinks_both_models_from_one_library(self):
+        self.open_props()
+        bpy.ops.bb.edit_source(name="Crate")
+        bpy.ops.wm.save_mainfile()
+        self.assertEqual(bpy.ops.bb.return_to_scene(), {"FINISHED"})
+        crate, tower = bpy.data.objects["Crate"].instance_collection, bpy.data.objects["Tower"].instance_collection
+        self.assertEqual((crate.name, tower.name), ("Box", "Spire"))
+        self.assertIs(crate.library, tower.library)
+        self.assertEqual(len(bpy.data.libraries), 1, "props.blend is linked once")
+
+    def test_second_exporter_on_a_collection_exports_another_format(self):
+        self.open_props()
+        bpy.ops.bb.edit_source(name="Crate")
+        box = bpy.data.collections["Box"]
+        with bpy.context.temp_override(collection=box):
+            bpy.ops.collection.exporter_add(name="IO_FH_fbx")
+        fbx = os.path.join(harness.ASSETS, "crate_extra.fbx")
+        self.addCleanup(lambda: os.path.exists(fbx) and os.remove(fbx))
+        box.exporters[-1].filepath = fbx
+        before = os.stat(self.glbs()[0]).st_mtime_ns
+        time.sleep(0.05)
+        bpy.ops.wm.save_mainfile()
+        self.assertTrue(os.path.isfile(fbx), "the second exporter ran")
+        self.assertGreater(os.stat(self.glbs()[0]).st_mtime_ns, before, "the glTF one too")
+        self.assertEqual(box[bridge.C_ASSET], self.CRATE, "the asset is the glTF exporter's file")
+
+    def test_exporter_added_in_blender_applies_modifiers_unless_switched_off(self):
+        self.open_props()
+        bpy.ops.bb.edit_source(name="Crate")
+        mesh = bpy.data.meshes.new("Rail")
+        mesh.from_pydata([(0, 0, 0), (1, 0, 0), (0, 1, 0)], [], [(0, 1, 2)])
+        body = bpy.data.objects.new("Rail_body", mesh)
+        body.modifiers.new("Array", "ARRAY").count = 3
+        rail = bpy.data.collections.new("Rail")
+        rail.objects.link(body)
+        bpy.context.scene.collection.children.link(rail)
+        # Blender's own Collection Exporters ▸ Add, not Blenderang's.
+        with bpy.context.temp_override(collection=rail):
+            bpy.ops.collection.exporter_add(name="IO_FH_gltf2")
+        glb = os.path.join(harness.ASSETS, "rail.glb")
+        self.addCleanup(lambda: os.path.exists(glb) and os.remove(glb))
+        rail.exporters[0].filepath = glb
+        box = bridge.gltf_exporter(bpy.data.collections["Box"]).export_properties
+        box.export_apply = False   # switched off by hand, e.g. for shape keys
+        bpy.ops.wm.save_mainfile()
+        self.assertTrue(bridge.gltf_exporter(rail).export_properties.export_apply)
+        self.assertEqual(glb_vertex_count(glb), 9, "the Array modifier is applied")
+        self.assertFalse(box.export_apply, "a choice made by hand stays")
+        bpy.ops.wm.open_mainfile(filepath=bpy.data.filepath)
+        self.assertFalse(bridge.gltf_exporter(bpy.data.collections["Box"]).export_properties.export_apply,
+                         "and survives reopening")
+
+
+def glb_json(path: str) -> dict:
+    with open(path, "rb") as handle:
+        handle.seek(12)
+        length, _ = struct.unpack("<II", handle.read(8))
+        return json.loads(handle.read(length))
 
 
 class AutoSaveToGodotTest(BridgeCase):

@@ -708,6 +708,7 @@ def _on_load_post(_: object) -> None:
         bridge.follow_moved_assets(root)
         bridge.localize_export_paths(root)
         bridge.remember_asset_uids(root)
+        bridge.apply_modifiers_by_default()
     if session is not None and session["manifest"]:
         with bpy.context.temp_override(**bridge.ui_context()):
             bridge.build_context(session)
