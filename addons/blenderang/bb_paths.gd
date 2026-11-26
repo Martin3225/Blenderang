@@ -27,6 +27,8 @@ extends RefCounted
 const OVERRIDE_EXTENSION: String = "bbsrc"
 const SOURCE_EXTENSION: String = "blend"
 const MODELS_PREFIX: String = "models://"
+## Assets that can have a source .blend.
+const MODEL_EXTENSIONS: PackedStringArray = ["glb", "gltf", "fbx"]
 
 ## Personal choice of sources outside the project. The folder has its own .gitignore with "*",
 ## so it's never committed and the team's .gitignore doesn't need touching.
@@ -59,6 +61,11 @@ static func source_for(asset_path: String) -> String:
 	var personal: String = read_local(asset_path)
 	if not personal.is_empty() and FileAccess.file_exists(personal):
 		return personal
+	return _shared_source_for(asset_path)
+
+
+## [method source_for] without the personal choice: the source the whole team gets.
+static func _shared_source_for(asset_path: String) -> String:
 	var candidate: String = read_override(asset_path)
 	if candidate.is_empty():
 		candidate = expected_source_for(asset_path)
@@ -67,6 +74,57 @@ static func source_for(asset_path: String) -> String:
 	if candidate.is_empty():
 		return ""
 	return candidate if FileAccess.file_exists(absolute_source(candidate)) else ""
+
+
+## Keeps the source of an asset the FileSystem dock moved or renamed (called after
+## the move). The personal choice and [code].bbsrc[/code] follow the asset; when the
+## source wouldn't resolve the same way at the new path (renamed asset, a .blend left
+## next to the old place), a [code].bbsrc[/code] there points to it. A moved folder
+## takes its .bbsrc and .blend files along on disk; project paths inside .bbsrc are
+## moved along with it.
+static func follow_move(old_asset: String, new_asset: String) -> void:
+	var personal: String = read_local(old_asset)
+	if not personal.is_empty():
+		write_local(old_asset, "")
+		write_local(new_asset, personal)
+	var before: String = _source_before_move(old_asset, new_asset)
+	write_override(old_asset, "")
+	if before.is_empty() or _shared_source_for(new_asset) == before:
+		return
+	write_override(new_asset, "" if before == expected_source_for(new_asset) else before)
+
+
+## The shared source the asset had at its old path, as a path valid after the move.
+static func _source_before_move(old_asset: String, new_asset: String) -> String:
+	# A single file moves alone and its .bbsrc stays; a moved folder takes it along.
+	var marker: String = read_override(old_asset)
+	if marker.is_empty():
+		marker = read_override(new_asset)
+	if not marker.is_empty():
+		var moved: String = _moved_along(marker, old_asset, new_asset)
+		return moved if FileAccess.file_exists(absolute_source(moved)) else ""
+	var sibling: String = _moved_along(expected_source_for(old_asset), old_asset, new_asset)
+	if FileAccess.file_exists("res://" + sibling):
+		return sibling
+	return find_in_models_folder(old_asset)
+
+
+## A project path after the asset's move: unchanged while the file is still there,
+## otherwise moved like the asset's folder ([code]a/b/x.glb[/code] → [code]c/b/x.glb[/code]
+## moved [code]a/[/code] to [code]c/[/code]).
+static func _moved_along(stored: String, old_asset: String, new_asset: String) -> String:
+	if stored.begins_with(MODELS_PREFIX) or stored.is_absolute_path() or FileAccess.file_exists("res://" + stored):
+		return stored
+	var old_parts: PackedStringArray = old_asset.trim_prefix("res://").split("/")
+	var new_parts: PackedStringArray = new_asset.trim_prefix("res://").split("/")
+	while old_parts.size() > 1 and new_parts.size() > 1 \
+			and old_parts[old_parts.size() - 1] == new_parts[new_parts.size() - 1]:
+		old_parts.remove_at(old_parts.size() - 1)
+		new_parts.remove_at(new_parts.size() - 1)
+	var old_folder: String = "/".join(old_parts) + "/"
+	if not stored.begins_with(old_folder):
+		return stored
+	return "/".join(new_parts) + "/" + stored.substr(old_folder.length())
 
 
 ## File path of a source as [method source_for] returns it. A [code]models://[/code]

@@ -17,7 +17,7 @@ import os
 import bpy
 from bpy.app.handlers import persistent
 from bpy.props import BoolProperty, StringProperty
-from bpy_extras.io_utils import ImportHelper
+from bpy_extras.io_utils import ExportHelper, ImportHelper
 
 from . import bridge
 
@@ -392,8 +392,29 @@ class BB_OT_return_to_scene(bpy.types.Operator):
         return {"FINISHED"}
 
 
+# The model whose export settings the panel shows, picked by its button. An
+# excluded collection can't be made active, so the pick holds until the active
+# collection changes; then the active collection is shown again.
+_SHOWN = {"model": "", "over": ""}
+
+
+def _show(view_layer: bpy.types.ViewLayer, collection: bpy.types.Collection) -> None:
+    bridge.activate_collection(view_layer, collection)
+    _SHOWN["model"] = collection.name
+    _SHOWN["over"] = view_layer.active_layer_collection.collection.name
+
+
+def _shown_collection(context: bpy.types.Context) -> bpy.types.Collection | None:
+    active = context.collection
+    if _SHOWN["model"] and active is not None and active.name == _SHOWN["over"]:
+        picked = next((c for c in bridge.model_collections() if c.name == _SHOWN["model"]), None)
+        if picked is not None:
+            return picked
+    return active
+
+
 class BB_OT_show_model(bpy.types.Operator):
-    """Make the collection active; its exporters show below"""
+    """Show the collection's export settings below; it's made active unless it's excluded from the view layer"""
 
     bl_idname = "bb.show_model"
     bl_label = "Show export settings"
@@ -402,9 +423,70 @@ class BB_OT_show_model(bpy.types.Operator):
     name: StringProperty(options={"HIDDEN", "SKIP_SAVE"})
 
     def execute(self, context: bpy.types.Context) -> set[str]:
-        collection = bpy.data.collections.get(self.name)
-        if collection is None or not bridge.activate_collection(context.view_layer, collection):
+        collection = next((c for c in bridge.model_collections() if c.name == self.name), None)
+        if collection is None:
             return {"CANCELLED"}
+        _show(context.view_layer, collection)
+        return {"FINISHED"}
+
+
+def _guess_root() -> str:
+    """The Godot project of a .blend that isn't linked: found from its place,
+    otherwise the only known project."""
+    root, _ = bridge.project_for(bpy.data.filepath)
+    known = bridge.projects()
+    return root or (known[0] if len(known) == 1 else "")
+
+
+def _export_file(collection: bpy.types.Collection) -> str:
+    """The file the collection's glTF exporter writes, or empty when it has no path."""
+    exporter = bridge.gltf_exporter(collection)
+    return os.path.abspath(bpy.path.abspath(exporter.filepath)) if exporter is not None and exporter.filepath else ""
+
+
+class BB_OT_set_export_path(bpy.types.Operator, ExportHelper):
+    """Choose the file in the Godot project the collection exports to"""
+
+    bl_idname = "bb.set_export_path"
+    bl_label = "Export to"
+    bl_options = {"UNDO", "INTERNAL"}
+
+    filename_ext = ".glb"
+    check_extension = None   # .gltf is fine too
+    filter_glob: StringProperty(default="*.glb;*.gltf", options={"HIDDEN"})
+    name: StringProperty(options={"HIDDEN", "SKIP_SAVE"})
+
+    def invoke(self, context: bpy.types.Context, event: bpy.types.Event) -> set[str]:
+        collection = next((c for c in bridge.model_collections() if c.name == self.name), None)
+        root = bridge.file_root() or _guess_root()
+        if collection is None or not root:
+            return _report(self, bridge.BridgeError("the file isn't linked to a Godot project"))
+        current = _export_file(collection)
+        if current:
+            self.filepath = current
+        else:
+            # Next to where the .blend's own model goes, named after the collection.
+            asset, _ = bridge.suggested_asset(root, bpy.data.filepath)
+            folder = os.path.dirname(bridge.asset_abs(root, asset))
+            while not os.path.isdir(folder) and len(folder) > len(root):
+                folder = os.path.dirname(folder)
+            self.filepath = os.path.join(folder, collection.name + ".glb")
+        return ExportHelper.invoke(self, context, event)
+
+    def execute(self, context: bpy.types.Context) -> set[str]:
+        collection = next((c for c in bridge.model_collections() if c.name == self.name), None)
+        linked = bridge.file_root()
+        root = linked or _guess_root()
+        if collection is None or not root:
+            return _report(self, bridge.BridgeError("the file isn't linked to a Godot project"))
+        path = os.path.abspath(bpy.path.abspath(self.filepath))
+        if not path.lower().endswith((".glb", ".gltf")):
+            path += ".glb"
+        if not bridge.res_path(root, path):
+            return _report(self, bridge.BridgeError("pick a file inside the Godot project %s" % root))
+        # A file that isn't linked yet only gets the path; Link to Godot links it.
+        bridge.set_export_target(collection, path, linked)
+        self.report({"INFO"}, "%s exports to %s" % (collection.name, bridge.res_path(root, path)))
         return {"FINISHED"}
 
 
@@ -461,9 +543,7 @@ class BB_OT_link(bpy.types.Operator):
     def invoke(self, context: bpy.types.Context, event: bpy.types.Event) -> set[str]:
         if not bpy.data.filepath:
             return _report(self, bridge.BridgeError("save the file first; the path in Godot follows its place"))
-        root, _ = bridge.project_for(bpy.data.filepath)
-        known = bridge.projects()
-        self.project = root or (known[0] if len(known) == 1 else "")   # fills the rest
+        self.project = _guess_root()   # fills the rest
         return context.window_manager.invoke_props_dialog(self, width=640)
 
     def draw(self, context: bpy.types.Context) -> None:
@@ -540,8 +620,10 @@ class BB_OT_export_now(bpy.types.Operator):
         return bool(bridge.file_root())
 
     def execute(self, context: bpy.types.Context) -> set[str]:
-        bridge.localize_export_paths(bridge.file_root())
-        count = bridge.export_models()
+        root = bridge.file_root()
+        # Paths typed into the exporters' own File Path count, as on save.
+        bridge.sync_export_paths(root)
+        count = bridge.export_models(root)
         bridge.forget_models_index()
         if not count:
             return _report(self, bridge.BridgeError("no model has an export path"))
@@ -605,6 +687,7 @@ class BB_Preferences(bpy.types.AddonPreferences):
 @persistent
 def _on_load_post(_: object) -> None:
     bridge.forget_models_index()
+    _SHOWN.update(model="", over="")
     session = bridge.edit_session() or bridge.take_opened_source()
     if session is not None and session["asset"]:
         scene = bpy.context.scene
@@ -618,11 +701,13 @@ def _on_load_post(_: object) -> None:
             # nothing would be visible after opening.
             if collection not in scene.collection.children_recursive:
                 scene.collection.children.link(collection)
-            # The export settings in the panel belong to the active collection.
-            bridge.activate_collection(bpy.context.view_layer, collection)
+            # The panel shows the export settings of this collection.
+            _show(bpy.context.view_layer, collection)
     root = bridge.file_root()
     if root:
+        bridge.follow_moved_assets(root)
         bridge.localize_export_paths(root)
+        bridge.remember_asset_uids(root)
     if session is not None and session["manifest"]:
         with bpy.context.temp_override(**bridge.ui_context()):
             bridge.build_context(session)
@@ -634,15 +719,15 @@ def _on_save_pre(filepath: str, *_: object) -> None:
     bridge.follow_save_as(filepath)
     root = bridge.file_root()
     if root:
-        bridge.remember_export_paths(root)
         # Relative to where the file is being saved (Save As may move it).
-        bridge.localize_export_paths(root, filepath)
+        bridge.sync_export_paths(root, filepath)
 
 
 @persistent
 def _on_save_post(_: object, *__: object) -> None:
-    if bridge.file_root():
-        bridge.export_models(on_save=True)
+    root = bridge.file_root()
+    if root:
+        bridge.export_models(root, on_save=True)
     # A newly saved .blend may be the source Godot finds by name.
     bridge.forget_models_index()
     session = bridge.edit_session()
@@ -735,9 +820,7 @@ class BB_PT_panel(bpy.types.Panel):
         row.scale_y = 1.3
         row.operator(BB_OT_link.bl_idname, text="Link to Godot", icon="LINKED").auto = False
         row.operator(BB_OT_link.bl_idname, text="Auto save to Godot", icon="CHECKBOX_DEHLT").auto = True
-        root, _ = bridge.project_for(bpy.data.filepath)
-        known = bridge.projects()
-        root = root or (known[0] if len(known) == 1 else "")
+        root = _guess_root()
         column = box.column(align=True)
         real = bridge.host_path(bpy.data.filepath)
         if real != bpy.data.filepath:
@@ -793,34 +876,65 @@ class BB_PT_panel(bpy.types.Panel):
             box.label(text="Nothing exports yet; add an exporter to a collection.")
         for collection in models:
             _draw_model(box, context, collection, root)
-        # Blender's own Collection Exporters UI for the active collection.
-        active = context.collection
-        if active is None or active == context.scene.collection or active.library is not None \
-                or active.name == bridge.COLL_CONTEXT:
+        # Blender's own Collection Exporters UI for the picked model or the active
+        # collection. Overriding the context shows a collection that can't be made
+        # active (excluded from the view layer); its buttons get it from the layout.
+        shown = _shown_collection(context)
+        if shown is None or shown == context.scene.collection or shown.library is not None \
+                or shown.name == bridge.COLL_CONTEXT:
             box.label(text="Click a model (or make a collection active) for its export settings.")
             return
-        box.label(text="Export settings of %s (saved with the .blend)" % active.name, icon="SETTINGS")
-        box.template_collection_exporters()
+        box.label(text="Export settings of %s (saved with the .blend)" % shown.name, icon="SETTINGS")
+        settings = box.column()
+        settings.context_pointer_set("collection", shown)
+        with context.temp_override(collection=shown):
+            settings.template_collection_exporters()
+        _draw_limit(settings, shown)
+
+
+def _draw_limit(layout: bpy.types.UILayout, collection: bpy.types.Collection) -> None:
+    """glTF's Include ▸ Limit to. The glTF add-on draws it only in the File ▸ Export
+    dialog, yet the collection exporter honours these three. Active Collection and
+    Active Scene don't apply there: the collection is what gets exported."""
+    exporter = bridge.gltf_exporter(collection)
+    props = exporter.export_properties if exporter is not None else None
+    if props is None or not hasattr(props, "use_visible"):
+        return
+    header, body = layout.panel("BB_export_limit")
+    header.label(text="glTF Include: Limit to")
+    if body is None:
+        return
+    column = body.column(heading="Limit to", align=True)
+    column.use_property_split = True
+    column.use_property_decorate = False
+    for name in ("use_selection", "use_visible", "use_renderable"):
+        column.prop(props, name)
 
 
 def _draw_model(layout: bpy.types.UILayout, context: bpy.types.Context,
                 collection: bpy.types.Collection, root: str) -> None:
-    """A model's row: its collection, where it exports and what that means in Godot."""
+    """A model's row: its collection, where it exports (the button changes it) and
+    what that means in Godot."""
     row = layout.row(align=True)
     row.operator(BB_OT_show_model.bl_idname, text=collection.name, icon="OUTLINER_COLLECTION",
-                 depress=context.collection == collection).name = collection.name
-    asset = bridge.exported_asset(collection, root)
+                 depress=_shown_collection(context) == collection).name = collection.name
+    path = _export_file(collection)
+    # From the exporter itself, so a path typed into its File Path shows at once.
+    asset = bridge.res_path(root, path) if root and path else ""
+    label = row.row(align=True)
+    label.alert = not path
+    label.label(text=asset or path or "no path")
+    if root:
+        row.operator(BB_OT_set_export_path.bl_idname, text="" if path else "Set path…",
+                     icon="FILEBROWSER").name = collection.name
+    clash = [c.name for c in bridge.model_collections()
+             if c != collection and path and _export_file(c) and bridge._same_file(_export_file(c), path)]
+    if clash:
+        note = layout.row()
+        note.alert = True
+        note.label(text="%s exports the same file; one overwrites the other" % ", ".join(clash), icon="ERROR")
     if asset:
-        row.label(text=asset)
-        if root:
-            _draw_status(layout, root, asset)
-        return
-    exporter = bridge.gltf_exporter(collection)
-    if exporter is not None and exporter.filepath:
-        row.label(text=bpy.path.abspath(exporter.filepath))
-    else:
-        row.alert = True
-        row.label(text="no path; set File Path in its export settings")
+        _draw_status(layout, root, asset)
 
 
 def _draw_status(layout: bpy.types.UILayout, root: str, asset: str) -> None:
@@ -894,6 +1008,7 @@ _CLASSES = (
     BB_OT_open_source,
     BB_OT_return_to_scene,
     BB_OT_show_model,
+    BB_OT_set_export_path,
     BB_OT_link,
     BB_OT_auto_export,
     BB_OT_export_now,

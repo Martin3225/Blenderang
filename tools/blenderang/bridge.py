@@ -32,10 +32,13 @@ P_PREVIEW = "bb_preview"
 # C_PROJECT: the Godot project's name (``config/name``), to find the project on this
 #   disk when the .blend lies outside it and its models folder.
 # C_AUTO: saving the .blend exports the model (default on).
+# C_UID: Godot's ``uid://`` of the asset (from its ``.import``), to find the asset
+#   again after it's moved or renamed in Godot.
 # Together they make the .blend "linked": nothing about it is kept on this machine.
 C_ASSET = "bb_asset"
 C_PROJECT = "bb_project"
 C_AUTO = "bb_auto_export"
+C_UID = "bb_uid"
 
 S_MANIFEST = "bb_manifest"
 S_ROOT = "bb_project_root"
@@ -674,11 +677,14 @@ def set_export_target(collection: bpy.types.Collection, target: str, root: str,
 
 def _share_target(collection: bpy.types.Collection, inside: str, root: str) -> None:
     """Stores where the collection exports in the project (``inside``, relative to
-    ``root``), or clears it for an exporter writing outside the project."""
+    ``root``), or clears it for an exporter writing outside the project. Godot's
+    uid belongs to the old asset, so another path drops it."""
     if not inside:
-        collection.pop(C_ASSET, None)
-        collection.pop(C_PROJECT, None)
+        for key in (C_ASSET, C_PROJECT, C_UID):
+            collection.pop(key, None)
         return
+    if collection.get(C_ASSET) != "res://" + inside:
+        collection.pop(C_UID, None)
     for key, value in ((C_ASSET, "res://" + inside), (C_PROJECT, project_name(root))):
         if collection.get(key) != value:
             collection[key] = value
@@ -704,9 +710,33 @@ def model_collections() -> list[bpy.types.Collection]:
             if c.library is None and len(c.exporters) and c.name != COLL_CONTEXT and not c.get(P_PREVIEW)]
 
 
+def _has_path(collection: bpy.types.Collection) -> bool:
+    exporter = gltf_exporter(collection)
+    return exporter is not None and bool(exporter.filepath)
+
+
+def _copies(models: list[bpy.types.Collection]) -> set[str]:
+    """Names of models copied from another (Duplicate Collection): the copy keeps
+    the ``res://`` path, but Blender clears its exporter's path. ``libraries.write``
+    clears it too, so only a second model with the same ``res://`` path makes an
+    exporter without a path a copy. The one with a path, otherwise the first, is the original."""
+    groups: dict[str, list[bpy.types.Collection]] = {}
+    for collection in models:
+        if collection.get(C_ASSET):
+            groups.setdefault(str(collection[C_ASSET]), []).append(collection)
+    copies: set[str] = set()
+    for group in groups.values():
+        if len(group) > 1:
+            original = next((c for c in group if _has_path(c)), group[0])
+            copies.update(c.name for c in group if c != original and not _has_path(c))
+    return copies
+
+
 def linked_models() -> list[bpy.types.Collection]:
     """Models exporting into a Godot project (they carry its ``res://`` path)."""
-    return [c for c in model_collections() if c.get(C_ASSET)]
+    models = model_collections()
+    copies = _copies(models)
+    return [c for c in models if c.get(C_ASSET) and c.name not in copies]
 
 
 def localize_export_paths(root: str, blend_path: str = "") -> None:
@@ -724,11 +754,74 @@ def localize_export_paths(root: str, blend_path: str = "") -> None:
 def remember_export_paths(root: str) -> None:
     """Before saving: the ``res://`` path of every exporter writing into the
     project, so the shared .blend finds the asset on another disk too. An
-    exporter pointed outside the project keeps only its own path."""
-    for collection in model_collections():
+    exporter pointed outside the project keeps only its own path; a copied model
+    without a path drops the one it was copied with."""
+    models = model_collections()
+    copies = _copies(models)
+    for collection in models:
         exporter = gltf_exporter(collection)
-        if exporter is not None and exporter.filepath:
+        if collection.name in copies:
+            _share_target(collection, "", root)
+        elif exporter is not None and exporter.filepath:
             _share_target(collection, _relative_inside(bpy.path.abspath(exporter.filepath), root), root)
+
+
+def _import_uid(import_path: str) -> str:
+    """The ``uid://…`` in a Godot ``.import`` file, or empty."""
+    try:
+        with open(import_path, encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("uid="):
+                    return line.split("=", 1)[1].strip().strip('"')
+    except (OSError, UnicodeDecodeError):
+        pass
+    return ""
+
+
+def remember_asset_uids(root: str) -> None:
+    """Godot's uid of each linked asset, once Godot has imported it (its ``.import``
+    is in the project), so ``follow_moved_assets`` can find it after a move."""
+    for collection in linked_models():
+        uid = _import_uid(asset_abs(root, str(collection[C_ASSET])) + ".import")
+        if uid and collection.get(C_UID) != uid:
+            collection[C_UID] = uid
+
+
+def follow_moved_assets(root: str) -> list[str]:
+    """Models whose asset was moved or renamed in Godot export to the new path:
+    the file at the stored path is gone, and the ``.import`` with its uid is
+    elsewhere in the project. Otherwise the next export would recreate the asset
+    at its old path. Returns the new ``res://`` paths."""
+    lost = {str(c[C_UID]): c for c in linked_models()
+            if c.get(C_UID) and not os.path.isfile(asset_abs(root, str(c[C_ASSET])))}
+    moved: list[str] = []
+    if not lost:
+        return moved
+    for folder, folders, files in os.walk(root):
+        folders[:] = [name for name in folders if not name.startswith(".")]   # .godot, .git, .pipeline
+        for name in files:
+            if not name.endswith(".import"):
+                continue
+            collection = lost.pop(_import_uid(os.path.join(folder, name)), None)
+            if collection is None:
+                continue
+            asset = os.path.join(folder, name[:-len(".import")])
+            print("Blenderang: %s moved in Godot to %s" % (collection[C_ASSET], res_path(root, asset)))
+            set_export_target(collection, asset, root)
+            moved.append(res_path(root, asset))
+            if not lost:
+                return moved
+    return moved
+
+
+def sync_export_paths(root: str, blend_path: str = "") -> None:
+    """Before saving or exporting: follow assets moved in Godot, take paths typed
+    into the exporters, record Godot's uids, and point the exporters at the
+    project on this disk relative to ``blend_path`` (default: the open file)."""
+    follow_moved_assets(root)
+    remember_export_paths(root)
+    remember_asset_uids(root)
+    localize_export_paths(root, blend_path)
 
 
 def export_collection(collection: bpy.types.Collection) -> None:
@@ -738,9 +831,12 @@ def export_collection(collection: bpy.types.Collection) -> None:
         bpy.ops.collection.export_all()
 
 
-def export_models(on_save: bool = False) -> int:
+def export_models(root: str, on_save: bool = False) -> int:
     """Exports the models of the open .blend, on save only those with auto save
-    on; returns how many."""
+    on; returns how many. Each asset Godot wouldn't find this file for gets a
+    ``.bbsrc`` pointing at it (``link_source``)."""
+    forget_models_index()   # this file may be new in the models folder
+    blend_path = host_path(bpy.data.filepath)
     exported = 0
     for collection in model_collections():
         if on_save and not collection.get(C_AUTO, True):
@@ -748,7 +844,36 @@ def export_models(on_save: bool = False) -> int:
         if any(e.filepath for e in collection.exporters):
             export_collection(collection)
             exported += 1
+            asset = exported_asset(collection, root)
+            if asset and blend_path:
+                link_source(root, asset, blend_path)
     return exported
+
+
+def shared_source(root: str, blend_path: str) -> str:
+    """How ``.bbsrc`` stores the .blend for everyone: relative to the project, or
+    ``models://…`` inside the models folder; empty for a file outside both."""
+    absolute = os.path.abspath(blend_path)
+    stored = _relative_inside(absolute, root)
+    if not stored:
+        inside_models = _relative_inside(absolute, models_folder(root))
+        stored = MODELS_PREFIX + inside_models if inside_models else ""
+    return stored
+
+
+def link_source(root: str, asset_src: str, blend_path: str) -> bool:
+    """Makes Godot find ``blend_path`` as the asset's source when it finds none
+    (the .blend is named differently, or exports several models): writes the
+    shared ``<asset>.bbsrc``. An asset with another source keeps it; a .blend
+    outside the project and the models folder can't be shared. True when written."""
+    if source_of({"src": asset_src}, root):
+        return False
+    stored = shared_source(root, blend_path)
+    if not stored:
+        return False
+    with open(override_path(root, asset_src), "w", encoding="utf-8") as handle:
+        handle.write(stored)
+    return True
 
 
 def auto_export() -> bool:
@@ -1092,20 +1217,26 @@ def godot_status(root: str, asset_src: str) -> tuple[str, bool]:
     """What exporting the asset means in Godot, for the open file: (text, problem).
 
     Linked: Godot resolves the asset's source to this .blend (``source_of``, the
-    same rule as BBPaths), so *Edit* in Godot opens it. A problem is an asset whose
-    source is another .blend, or one Godot won't find this file for.
+    same rule as BBPaths), so *Edit* in Godot opens it. An asset without a source
+    gets linked by the export (``link_source``). A problem is an asset whose source
+    is another .blend, or a file outside the project and the models folder, which
+    Godot can't be told about.
     """
     exists = os.path.isfile(asset_abs(root, asset_src))
     stored = source_of({"src": asset_src}, root)
     source = source_abs(root, stored) if stored else ""
-    if source and _same_file(source, host_path(bpy.data.filepath)):
+    blend_path = host_path(bpy.data.filepath)
+    if source and _same_file(source, blend_path):
         return ("in Godot, linked to this file; export overwrites it" if exists
                 else "new in Godot, linked to this file"), False
     if source:
         return "in Godot, its source is %s; export overwrites it" % stored, True
-    if exists:
-        return "in Godot without this file as its source; export overwrites it", True
-    return "new in Godot; it won't find this file as its source", True
+    if shared_source(root, blend_path):
+        return ("in Godot without a source; export overwrites it and links this file" if exists
+                else "new in Godot; export links this file as its source"), False
+    return ("in Godot; export overwrites it, but Godot can't find this file outside the project "
+            "and the models folder" if exists
+            else "new in Godot; it can't find this file outside the project and the models folder"), True
 
 
 def end_edit(session: dict[str, Any]) -> str:
@@ -1482,10 +1613,7 @@ def choose_source(scene: bpy.types.Scene, asset_src: str, blend_path: str) -> tu
     absolute = os.path.abspath(blend_path)
     if not os.path.isfile(absolute) or not absolute.lower().endswith(".blend"):
         raise BridgeError("pick an existing .blend file")
-    stored = _relative_inside(absolute, root)
-    if not stored:
-        inside_models = _relative_inside(absolute, models_folder(root))
-        stored = MODELS_PREFIX + inside_models if inside_models else ""
+    stored = shared_source(root, absolute)
     personal = not stored
 
     collection = _link_library_collection(absolute, asset_src, root)

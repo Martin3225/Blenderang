@@ -65,7 +65,7 @@ func _enter_tree() -> void:
 		EditorContextMenuPlugin.CONTEXT_SLOT_SCENE_TABS,
 		EditorContextMenuPlugin.CONTEXT_SLOT_FILESYSTEM,
 	]:
-		var menu: EditorContextMenuPlugin = preload("bb_context_menu.gd").new(open_scene_in_blender, open_source_in_blender)
+		var menu: EditorContextMenuPlugin = preload("bb_context_menu.gd").new(open_scene_in_blender, open_source_in_blender, pick_source_for)
 		add_context_menu_plugin(slot, menu)
 		_context_menus.append(menu)
 
@@ -81,6 +81,7 @@ func _enter_tree() -> void:
 	var filesystem: EditorFileSystem = EditorInterface.get_resource_filesystem()
 	filesystem.resources_reimporting.connect(_on_reimporting)
 	filesystem.resources_reimported.connect(_on_reimported)
+	EditorInterface.get_file_system_dock().files_moved.connect(_on_file_moved)
 
 
 func _exit_tree() -> void:
@@ -95,6 +96,7 @@ func _exit_tree() -> void:
 	var filesystem: EditorFileSystem = EditorInterface.get_resource_filesystem()
 	filesystem.resources_reimporting.disconnect(_on_reimporting)
 	filesystem.resources_reimported.disconnect(_on_reimported)
+	EditorInterface.get_file_system_dock().files_moved.disconnect(_on_file_moved)
 	_watch.queue_free()
 	_watch = null
 
@@ -130,6 +132,13 @@ func open_source_in_blender(asset: String) -> void:
 	var source: String = BBPaths.absolute_source(stored)
 	if BBLauncher.launch_source(source, asset) == OK:
 		print("Blenderang: launching Blender with %s." % source)
+
+
+## The FileSystem dock moved or renamed a file (one by one for a whole folder);
+## a model keeps its source .blend.
+func _on_file_moved(old_file: String, new_file: String) -> void:
+	if BBPaths.MODEL_EXTENSIONS.has(new_file.get_extension().to_lower()):
+		BBPaths.follow_move(old_file, new_file)
 
 
 func _on_action(id: int) -> void:
@@ -185,7 +194,13 @@ func _pick_source() -> void:
 	if selected.size() != 1 or selected[0].scene_file_path.is_empty():
 		push_warning("Blenderang: select exactly one instanced node.")
 		return
-	var asset: String = selected[0].scene_file_path
+	pick_source_for(selected[0].scene_file_path)
+
+
+## Entry point from the FileSystem context menu too: a file dialog for the asset's
+## source, starting at the current source, otherwise in the models folder where the
+## asset's source belongs by convention.
+func pick_source_for(asset: String) -> void:
 	var dialog: EditorFileDialog = EditorFileDialog.new()
 	dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_FILE
 	# Whole disk: the source doesn't have to be in the project, not everyone on the team has the sources.
@@ -193,10 +208,12 @@ func _pick_source() -> void:
 	dialog.add_filter("*.blend", "Blender files")
 	dialog.title = "Source .blend for %s" % asset.get_file()
 	var current: String = BBPaths.source_for(asset)
+	var folder: String = BBPaths.models_folder()
 	if not current.is_empty():
 		dialog.current_path = BBPaths.absolute_source(current)
-	elif not BBPaths.models_folder().is_empty():
-		dialog.current_dir = BBPaths.models_folder()
+	elif not folder.is_empty():
+		var mirrored: String = folder.path_join(BBPaths.models_relative(asset).get_base_dir())
+		dialog.current_dir = mirrored if DirAccess.dir_exists_absolute(mirrored) else folder
 	else:
 		dialog.current_path = ProjectSettings.globalize_path("res://" + BBPaths.expected_source_for(asset))
 	dialog.file_selected.connect(func(path: String) -> void:

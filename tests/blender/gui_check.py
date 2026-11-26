@@ -198,11 +198,28 @@ def step_unlinked_file():
     drawn.clear()
     ok, message = panel_drew("edit")
     record("linked file panel with the Godot status draws", ok, message)
+    return 0.5
+
+
+def step_excluded_model():
+    # A second model, excluded from the view layer: Blender won't make it active.
+    collection = bpy.data.collections.new("gui_shade")
+    bpy.context.scene.collection.children.link(collection)
+    bridge.set_export_target(collection, os.path.join(options["--project"], "fixtures", "assets", "gui_shade.glb"),
+                             bridge.file_root())
+    view_layer = bpy.context.view_layer
+    next(lc for lc in view_layer.layer_collection.children if lc.collection == collection).exclude = True
+    window, area = view3d()
+    with bpy.context.temp_override(window=window, area=area):
+        record("pick an excluded model", bpy.ops.bb.show_model(name="gui_shade") == {"FINISHED"})
+    drawn.clear()
+    ok, message = panel_drew("edit")
+    record("export settings of an excluded model draw", ok, message)
     return None
 
 
 STEPS = [step_scene_opened, step_promote_and_edit, step_in_edit, step_back_in_scene,
-         step_open_unlinked_file, step_unlinked_file]
+         step_open_unlinked_file, step_unlinked_file, step_excluded_model]
 
 
 def run_steps():

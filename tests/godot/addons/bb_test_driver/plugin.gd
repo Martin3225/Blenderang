@@ -117,14 +117,44 @@ func _phase_restart(bridge: EditorPlugin) -> void:
 func _phase_context_menu(bridge: EditorPlugin) -> void:
 	var opened: Array[String] = []
 	var sources: Array[String] = []
+	var picks: Array[String] = []
 	var menu: EditorContextMenuPlugin = load("res://addons/blenderang/bb_context_menu.gd").new(
-		func(path: String) -> void: opened.append(path), func(path: String) -> void: sources.append(path))
+		func(path: String) -> void: opened.append(path), func(path: String) -> void: sources.append(path),
+		func(path: String) -> void: picks.append(path))
 	menu.call("_on_pressed", PackedStringArray(["res://fixtures/scenes/second.tscn"]))
 	menu.call("_on_pressed", EditorInterface.get_edited_scene_root())
 	_record("context menu gets the path from a file and from a scene tab",
 		opened == ["res://fixtures/scenes/second.tscn", "res://fixtures/scenes/basic.tscn"], "dostal %s" % [opened])
 	menu.call("_on_source_pressed", PackedStringArray(["res://fixtures/assets/crate.glb"]))
 	_record("context menu gets the model from the FileSystem", sources == ["res://fixtures/assets/crate.glb"], "got %s" % [sources])
+	menu.call("_on_pick_pressed", PackedStringArray(["res://fixtures/assets/crate.glb"]))
+	_record("context menu picks a source for a model", picks == ["res://fixtures/assets/crate.glb"], "got %s" % [picks])
+
+	# "Pick source .blend…" on a model without a source starts where its source belongs in the models folder.
+	var models: String = ProjectSettings.globalize_path("res://").path_join("../pick_models").simplify_path()
+	DirAccess.make_dir_recursive_absolute(models.path_join("fixtures/assets"))
+	BBPaths.set_models_folder(models)
+	bridge.call("pick_source_for", "res://fixtures/assets/crate.glb")
+	var dialogs: Array = EditorInterface.get_base_control().get_children().filter(
+		func(node: Node) -> bool: return node is EditorFileDialog and node.title.ends_with("crate.glb"))
+	var start: String = dialogs[-1].current_dir if not dialogs.is_empty() else "no dialog"
+	for dialog: Node in dialogs:
+		dialog.queue_free()
+	BBPaths.set_models_folder("")
+	_record("picking a source starts in the models folder", start == models.path_join("fixtures/assets"), "started in %s" % start)
+
+	# The dock reports a renamed model (it moves only the file and its .import); its .bbsrc follows.
+	var elsewhere: String = "res://fixtures/moved_source.blend"
+	FileAccess.open(elsewhere, FileAccess.WRITE).close()
+	BBPaths.write_override("res://fixtures/assets/crate.glb", elsewhere)
+	EditorInterface.get_file_system_dock().files_moved.emit("res://fixtures/assets/crate.glb", "res://fixtures/assets/box.glb")
+	var followed: String = BBPaths.source_for("res://fixtures/assets/box.glb")
+	var left: bool = FileAccess.file_exists(BBPaths.override_path("res://fixtures/assets/crate.glb"))
+	BBPaths.write_override("res://fixtures/assets/box.glb", "")
+	BBPaths.write_override("res://fixtures/assets/crate.glb", "")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(elsewhere))
+	_record("a model moved in the FileSystem dock keeps its source", followed == "fixtures/moved_source.blend" and not left,
+		"source %s, old .bbsrc left: %s" % [followed, left])
 
 	# "Open source in Blender": the source next to the asset goes to Blender with the asset and the project.
 	var blend: String = "res://fixtures/assets/crate.blend"

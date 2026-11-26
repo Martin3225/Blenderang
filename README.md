@@ -168,7 +168,9 @@ That's it.
 
 To edit a model without a scene, right-click its `.glb` / `.fbx` in Godot's
 FileSystem dock and choose **Open source in Blender**. `Ctrl+S` there
-re-exports the asset into your project the same way.
+re-exports the asset into your project the same way. A model Godot finds no
+source for offers only **Pick source .blend…** there; the file dialog starts at
+the asset's mirrored path in the models folder.
 
 A source stays linked to its asset after **Save and return to scene**: the
 link is stored in the `.blend` itself. Reopening it by hand with Blenderang
@@ -197,10 +199,11 @@ A `.blend` you made yourself, not from Godot, can export into the game too:
 
 The panel shows what the export means in Godot: whether the `.glb` already
 exists (and gets overwritten) and whether Godot finds this `.blend` as its
-source, so **Edit** in Godot opens it. Godot finds a source by name, so a
-`.blend` under another name (Save As, incremental save, renamed in the file
-manager) keeps exporting to the same `.glb` but shows a warning; pick it as
-the source in Godot or name it after the `.glb`.
+source, so **Edit** in Godot opens it. Godot finds a source by name, so when it
+doesn't find this `.blend` (another name, Save As, several models in one file),
+the export writes `<asset>.bbsrc` pointing at it. That works for a `.blend` in
+the project or the models folder; one elsewhere gets a warning. An asset whose
+source is another `.blend` keeps it, with a warning that the export overwrites it.
 
 Blender knows a Godot project once it has opened it from Godot; you can also
 add or remove projects in `Preferences ▸ Add-ons ▸ Blenderang`. The `assets`
@@ -217,7 +220,7 @@ shared through the files:
 | Godot projects on this disk | Blender config, `blenderang_projects.json` | no |
 | models folder on this disk | `.pipeline/local/settings.json` in the Godot project | no |
 | sources outside both repositories | `.pipeline/local/sources.json` | no |
-| the asset a model exports to (`res://…`), the Godot project's name, Auto save | the `.blend`, on the model's collection | yes |
+| the asset a model exports to (`res://…`) and its Godot uid, the Godot project's name, Auto save | the `.blend`, on the model's collection | yes |
 | the exporter's path | the `.blend`, relative to it (`//…`) | yes |
 | a source picked by hand | `<asset>.bbsrc` | yes |
 
@@ -225,6 +228,24 @@ A `.blend` finds its Godot project by where it lies (in the project or its
 models folder), otherwise by the project's name. While you edit a model from a
 scene, Blender keeps the scene to return to in `blenderang_edit.json`; the
 entry is removed when you return.
+
+### Moving and renaming files
+
+- **A `.glb` in Godot's FileSystem dock** (a single file or a whole folder):
+  its source follows. Its `.bbsrc` and personal pick move with it, and when
+  Godot wouldn't find the source at the new path (renamed asset, a `.blend`
+  left next to the old place), a `.bbsrc` there points to it. The `.blend`
+  learns about it when it opens, saves or exports: it keeps Godot's uid of the
+  asset (from its `.import`) and finds the asset under its new path, instead of
+  recreating it at the old one. The uid is recorded once Godot has imported the
+  asset and the `.blend` was opened or saved after that.
+- **A `.blend`** (file manager, `git mv`, Save As): it keeps exporting to the
+  same asset. If Godot no longer finds it by name, the next export writes a
+  `.bbsrc`. After Save As the old file remains Godot's source until you delete it.
+  A personal source (outside the project and the models folder) has to be
+  picked again.
+- **A collection** in Blender: its name doesn't matter. Don't nest one model's
+  collection inside another's: the outer `.glb` would contain both.
 
 ## How it works
 
@@ -290,8 +311,9 @@ the mirrored path, instead of next to the asset in the game project.
 #### Picking a source by hand
 
 If your source is somewhere else, pick it by hand with **Pick source** in
-Blender (model list, **Detail** or `Tab` on the model) or `Project ▸ Tools ▸
-Blenderang ▸ Pick source .blend for selection…` in Godot. The file browser
+Blender (model list, **Detail** or `Tab` on the model), or in Godot with
+`Project ▸ Tools ▸ Blenderang ▸ Pick source .blend for selection…` or
+**Pick source .blend…** on a model in the FileSystem dock. The file browser
 starts in the models folder when one is set.
 
 | where the picked `.blend` is | stored in | who sees it |
@@ -309,9 +331,17 @@ A model in a `.blend` is a **collection with a glTF exporter** (Blender's own
 Collection Exporter, `Properties ▸ Collection ▸ Exporters`). The exporter's path
 decides which asset it is; the collection can have any name. Blenderang
 doesn't add settings of its own: what you set in the exporter is what's
-exported, and it's saved in the `.blend`. The panel lists the file's models;
-click one to show its exporter with all of Blender's glTF options, including
-**Export All** to re-export without saving.
+exported, and it's saved in the `.blend`. The panel lists the file's models
+with the `.glb` each exports to; the folder button next to it picks another
+file in the Godot project (a model without a path shows **Set path…**). Click a
+model to show its exporter with all of Blender's glTF options, including
+**Export All** to re-export without saving. This works for a collection
+excluded from the view layer too, which Blender can't make active.
+
+Blender's glTF add-on hides *Include ▸ Limit to* for collection exporters, yet
+the exporter still honours *Selected*, *Visible* and *Renderable Objects*;
+the panel shows these three below the exporter. *Active Collection* and
+*Active Scene* don't apply: the collection is what gets exported.
 
 The exporter's path is absolute and differs on every disk, so Blenderang also
 stores it on the collection as a `res://` path and points the exporter at the
@@ -323,7 +353,9 @@ Blender's defaults (it's off there), so switch it on if you use booleans.
 **Several models in one `.blend`:** give each its own collection with its own
 exporter. `Ctrl+S` exports all of them, and each asset in Godot links the
 collection that exports it. Several exporters on one collection export the
-same model several times (say `.glb` and `.fbx`).
+same model several times (say `.glb` and `.fbx`). A duplicated collection
+gets no path (Blender clears it): set its own with **Set path…**. The panel
+warns when two models export the same file.
 
 Helper objects that shouldn't end up in the `.glb` (boolean cutters, guides)
 go in a separate collection without an exporter, *next to* the model

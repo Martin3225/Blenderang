@@ -5,6 +5,8 @@ extends "res://tests/bb_test.gd"
 const ASSET: String = "res://fixtures/assets/crate.glb"
 const SIBLING: String = "res://fixtures/assets/crate.blend"
 const ELSEWHERE: String = "res://fixtures/elsewhere.blend"
+const MOVED: String = "res://fixtures/moved/crate.glb"
+const RENAMED: String = "res://fixtures/assets/box.glb"
 
 
 var _outside: String = ProjectSettings.globalize_path("res://").path_join("../outside_sources/crate_master.blend").simplify_path()
@@ -14,12 +16,16 @@ var _library: String = ProjectSettings.globalize_path("res://").path_join("../mo
 func _cleanup() -> void:
 	remove_file(SIBLING)
 	remove_file(ELSEWHERE)
-	remove_file(BBPaths.override_path(ASSET))
+	for asset: String in [ASSET, RENAMED]:
+		remove_file(BBPaths.override_path(asset))
 	remove_file(BBPaths.LOCAL_SOURCES)
 	remove_file(BBPaths.LOCAL_SETTINGS)
 	if FileAccess.file_exists(_outside):
 		DirAccess.remove_absolute(_outside)
 	_remove_tree(_library)
+	for folder: String in ["res://fixtures/moved", "res://fixtures/mv_a", "res://fixtures/mv_b"]:
+		_remove_tree(ProjectSettings.globalize_path(folder))
+	BBPaths.forget_models_index()
 
 
 func _remove_tree(path: String) -> void:
@@ -203,5 +209,65 @@ func test_choose_in_models_folder_is_shared_relative() -> void:
 	eq(BBPaths.source_for(ASSET), "models://props/crate_v2.blend", "Godot uses it")
 	BBPaths.set_models_folder("")
 	eq(BBPaths.source_for(ASSET), "", "without the folder set the shared path doesn't resolve")
+	_cleanup()
+	done()
+
+
+func test_moved_asset_takes_its_bbsrc_along() -> void:
+	_cleanup()
+	write_file(ELSEWHERE, "")
+	BBPaths.write_override(ASSET, ELSEWHERE)
+	BBPaths.follow_move(ASSET, RENAMED)
+	check(not FileAccess.file_exists(BBPaths.override_path(ASSET)), "nothing left at the old place")
+	eq(BBPaths.source_for(RENAMED), "fixtures/elsewhere.blend", "the renamed asset keeps its source")
+	_cleanup()
+	done()
+
+
+func test_moved_asset_points_to_the_blend_left_behind() -> void:
+	_cleanup()
+	write_file(SIBLING, "")
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(MOVED.get_base_dir()))
+	BBPaths.follow_move(ASSET, MOVED)
+	eq(BBPaths.read_override(MOVED), "fixtures/assets/crate.blend", "the dock moves only the .glb")
+	eq(BBPaths.source_for(MOVED), "fixtures/assets/crate.blend", "source")
+	_cleanup()
+	done()
+
+
+func test_moved_asset_keeps_its_source_in_the_models_folder() -> void:
+	_cleanup()
+	_library_file("props/crate.blend")
+	BBPaths.set_models_folder(_library)
+	BBPaths.follow_move(ASSET, MOVED)
+	check(not FileAccess.file_exists(BBPaths.override_path(MOVED)), "same name: still found by name, nothing to write")
+	BBPaths.follow_move(ASSET, RENAMED)
+	eq(BBPaths.read_override(RENAMED), "models://props/crate.blend", "renamed: no longer found by name")
+	eq(BBPaths.source_for(RENAMED), "models://props/crate.blend", "source")
+	_cleanup()
+	done()
+
+
+func test_moved_folder_moves_the_project_path_in_bbsrc() -> void:
+	_cleanup()
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://fixtures/mv_a/src"))
+	write_file("res://fixtures/mv_a/src/x_master.blend", "")
+	BBPaths.write_override("res://fixtures/mv_a/x.glb", "fixtures/mv_a/src/x_master.blend")
+	# What the dock does with a folder: everything in it moves on disk, then files_moved per asset.
+	DirAccess.rename_absolute(ProjectSettings.globalize_path("res://fixtures/mv_a"), ProjectSettings.globalize_path("res://fixtures/mv_b"))
+	BBPaths.follow_move("res://fixtures/mv_a/x.glb", "res://fixtures/mv_b/x.glb")
+	eq(BBPaths.read_override("res://fixtures/mv_b/x.glb"), "fixtures/mv_b/src/x_master.blend", "moved along with the folder")
+	eq(BBPaths.source_for("res://fixtures/mv_b/x.glb"), "fixtures/mv_b/src/x_master.blend", "source")
+	_cleanup()
+	done()
+
+
+func test_moved_asset_keeps_the_personal_source() -> void:
+	_cleanup()
+	_make_outside()
+	BBPaths.choose_source(ASSET, _outside)
+	BBPaths.follow_move(ASSET, RENAMED)
+	eq(BBPaths.read_local(ASSET), "", "the old entry is gone")
+	eq(BBPaths.source_for(RENAMED), _outside, "only for you, under the new path")
 	_cleanup()
 	done()

@@ -2,20 +2,22 @@
 extends EditorContextMenuPlugin
 
 ## Context menu items: "Open in Blender" on a scene tab and on a [code].tscn[/code]
-## in the FileSystem, "Open source in Blender" on an imported model whose source
-## [code].blend[/code] exists.
+## in the FileSystem; on an imported model "Open source in Blender" when its source
+## [code].blend[/code] exists, and "Pick source .blend…" to set or change it.
 
 const LABEL: String = "Open in Blender"
 const SOURCE_LABEL: String = "Open source in Blender"
-const MODEL_EXTENSIONS: PackedStringArray = ["glb", "gltf", "fbx"]
+const PICK_LABEL: String = "Pick source .blend…"
 
 var _open_scene: Callable
 var _open_source: Callable
+var _pick_source: Callable
 
 
-func _init(open_scene: Callable, open_source: Callable) -> void:
+func _init(open_scene: Callable, open_source: Callable, pick_source: Callable) -> void:
 	_open_scene = open_scene
 	_open_source = open_source
+	_pick_source = pick_source
 
 
 func _popup_menu(paths: PackedStringArray) -> void:
@@ -28,6 +30,7 @@ func _popup_menu(paths: PackedStringArray) -> void:
 	BBPaths.forget_models_index()
 	if not BBPaths.source_for(model).is_empty():
 		add_context_menu_item(SOURCE_LABEL, _on_source_pressed, BBIcons.blender())
+	add_context_menu_item(PICK_LABEL, _on_pick_pressed, BBIcons.blender())
 
 
 func _on_pressed(selection: Variant) -> void:
@@ -42,6 +45,12 @@ func _on_source_pressed(selection: Variant) -> void:
 		_open_source.call(model)
 
 
+func _on_pick_pressed(selection: Variant) -> void:
+	var model: String = _model_of(_paths_of(selection))
+	if not model.is_empty():
+		_pick_source.call(model)
+
+
 func _scene_of(paths: PackedStringArray) -> String:
 	for path: String in paths:
 		if path.get_extension() == "tscn":
@@ -51,7 +60,7 @@ func _scene_of(paths: PackedStringArray) -> String:
 
 ## Only for a single selected model: one click shouldn't start several Blenders.
 func _model_of(paths: PackedStringArray) -> String:
-	if paths.size() == 1 and MODEL_EXTENSIONS.has(paths[0].get_extension().to_lower()):
+	if paths.size() == 1 and BBPaths.MODEL_EXTENSIONS.has(paths[0].get_extension().to_lower()):
 		return paths[0]
 	return ""
 

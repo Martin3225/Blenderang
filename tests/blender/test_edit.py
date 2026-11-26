@@ -395,8 +395,116 @@ class AutoSaveToGodotTest(BridgeCase):
         self.assertTrue(bridge._same_file(bridge.file_root(), harness.PROJECT))
         bpy.ops.wm.save_mainfile()
         self.assertGreater(os.stat(self.glb).st_mtime_ns, before, "exports to the same asset")
-        text, problem = bridge.godot_status(root, "res://fixtures/assets/lamp.glb")
-        self.assertTrue(problem, "Godot looks for lamp.blend by name: " + text)
+        with open(self.glb + ".bbsrc", encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), "models://props/lamp_old.blend",
+                             "Godot no longer finds lamp.blend by name, so the export points it here")
+        self.assertEqual(bridge.godot_status(root, "res://fixtures/assets/lamp.glb"),
+                         ("in Godot, linked to this file; export overwrites it", False))
+
+    def test_second_model_gets_its_own_path_and_link(self):
+        _, root = self.new_lamp()
+        bpy.ops.bb.link_to_godot(auto=True, project=root, target="res://fixtures/assets/lamp.glb")
+        lamp = bpy.data.collections["lamp"]
+        shade = lamp.copy()   # Duplicate Collection: Blender clears the exporter's path, not ours
+        bpy.context.scene.collection.children.link(shade)
+        self.assertEqual(bridge.gltf_exporter(shade).filepath, "", "the copy exports nowhere yet")
+        self.assertEqual(bridge.linked_models(), [lamp], "nor does it take over lamp.glb")
+
+        glb = os.path.join(harness.ASSETS, "shade.glb")
+        self.addCleanup(lambda: os.path.exists(glb) and os.remove(glb))
+        self.assertEqual(bpy.ops.bb.set_export_path(name=shade.name, filepath=glb), {"FINISHED"})
+        self.assertEqual(shade[bridge.C_ASSET], "res://fixtures/assets/shade.glb")
+        self.assertEqual(bridge.godot_status(root, "res://fixtures/assets/shade.glb"),
+                         ("new in Godot; export links this file as its source", False))
+
+        self.assertEqual(bpy.ops.bb.export_now(), {"FINISHED"})
+        self.assertTrue(os.path.isfile(glb) and os.path.isfile(self.glb), "each collection its own file")
+        self.assertEqual(lamp[bridge.C_ASSET], "res://fixtures/assets/lamp.glb", "the original keeps its path")
+        with open(glb + ".bbsrc", encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), "models://props/lamp.blend")
+        self.assertFalse(os.path.exists(self.glb + ".bbsrc"), "lamp.blend is found by name")
+        self.assertEqual(bridge.godot_status(root, "res://fixtures/assets/shade.glb"),
+                         ("in Godot, linked to this file; export overwrites it", False))
+
+    def test_copied_collection_without_a_path_drops_the_shared_one(self):
+        _, root = self.new_lamp()
+        bpy.ops.bb.link_to_godot(auto=True, project=root, target="res://fixtures/assets/lamp.glb")
+        copy = bpy.data.collections["lamp"].copy()
+        bpy.context.scene.collection.children.link(copy)
+        bpy.ops.wm.save_mainfile()
+        self.assertNotIn(bridge.C_ASSET, copy, "otherwise Export now would fill in lamp.glb")
+        self.assertEqual(bridge.gltf_exporter(copy).filepath, "")
+
+    def test_excluded_collection_shows_its_export_settings(self):
+        import blenderang
+        _, root = self.new_lamp()
+        bpy.ops.bb.link_to_godot(auto=True, project=root, target="res://fixtures/assets/lamp.glb")
+        view_layer = bpy.context.view_layer
+        layer = next(lc for lc in view_layer.layer_collection.children if lc.collection.name == "lamp")
+        layer.exclude = True
+        view_layer.active_layer_collection = view_layer.layer_collection
+        self.assertEqual(bpy.ops.bb.show_model(name="lamp"), {"FINISHED"})
+        self.assertEqual(view_layer.active_layer_collection, view_layer.layer_collection,
+                         "Blender doesn't make an excluded collection active")
+        self.assertEqual(blenderang._shown_collection(bpy.context).name, "lamp")
+        other = bpy.data.collections.new("other")
+        bpy.context.scene.collection.children.link(other)
+        blenderang.bridge.activate_collection(view_layer, other)
+        self.assertEqual(blenderang._shown_collection(bpy.context), other, "the active collection takes over")
+
+    def test_asset_moved_in_godot_is_followed(self):
+        path, root = self.new_lamp()
+        bpy.ops.bb.link_to_godot(auto=True, project=root, target="res://fixtures/assets/lamp.glb")
+        bpy.ops.wm.save_mainfile()
+        imported = self.glb + ".import"
+        self.addCleanup(lambda: os.path.exists(imported) and os.remove(imported))
+        with open(imported, "w", encoding="utf-8") as handle:   # what Godot writes when it imports
+            handle.write('[remap]\n\nimporter="scene"\nuid="uid://lamptest"\n')
+        bpy.ops.wm.save_mainfile()
+        collection = bpy.data.collections["lamp"]
+        self.assertEqual(collection[bridge.C_UID], "uid://lamptest", "the uid is kept in the .blend")
+
+        # Godot's FileSystem dock moves the file and its .import; the uid stays.
+        folder = os.path.join(harness.ASSETS, "furniture")
+        os.makedirs(folder)
+        self.addCleanup(shutil.rmtree, folder, True)
+        moved = os.path.join(folder, "standing_lamp.glb")
+        os.replace(self.glb, moved)
+        os.replace(imported, moved + ".import")
+        before = os.stat(moved).st_mtime_ns
+        time.sleep(0.05)
+
+        bpy.ops.wm.save_mainfile()
+        self.assertFalse(os.path.exists(self.glb), "not recreated at the old path")
+        self.assertGreater(os.stat(moved).st_mtime_ns, before, "exported to the new one")
+        self.assertEqual(collection[bridge.C_ASSET], "res://fixtures/assets/furniture/standing_lamp.glb")
+        self.assertEqual(collection[bridge.C_UID], "uid://lamptest")
+        self.assertEqual(bridge.godot_status(root, "res://fixtures/assets/furniture/standing_lamp.glb"),
+                         ("in Godot, linked to this file; export overwrites it", False))
+
+        bpy.ops.wm.open_mainfile(filepath=path)
+        self.assertEqual(bpy.data.collections["lamp"][bridge.C_ASSET],
+                         "res://fixtures/assets/furniture/standing_lamp.glb", "saved in the .blend")
+
+    def test_new_path_drops_the_old_uid(self):
+        _, root = self.new_lamp()
+        bpy.ops.bb.link_to_godot(auto=True, project=root, target="res://fixtures/assets/lamp.glb")
+        collection = bpy.data.collections["lamp"]
+        collection[bridge.C_UID] = "uid://lamptest"
+        bridge.set_export_target(collection, os.path.join(harness.ASSETS, "shade.glb"), root)
+        self.assertNotIn(bridge.C_UID, collection, "it belonged to lamp.glb")
+
+    def test_existing_asset_without_source_is_linked_by_export(self):
+        _, root = self.new_lamp("desk")
+        with open(self.glb, "wb"):   # in Godot already, nobody's source
+            pass
+        self.addCleanup(lambda: os.path.exists(self.glb + ".bbsrc") and os.remove(self.glb + ".bbsrc"))
+        bpy.ops.bb.link_to_godot(auto=True, project=root, target="res://fixtures/assets/lamp.glb")
+        self.assertEqual(bridge.godot_status(root, "res://fixtures/assets/lamp.glb"),
+                         ("in Godot without a source; export overwrites it and links this file", False))
+        bpy.ops.wm.save_mainfile()
+        self.assertEqual(bridge.godot_status(root, "res://fixtures/assets/lamp.glb"),
+                         ("in Godot, linked to this file; export overwrites it", False))
 
     def test_save_as_outside_finds_the_project_by_name(self):
         _, root = self.new_lamp()
