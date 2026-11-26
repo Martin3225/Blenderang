@@ -26,6 +26,8 @@ func _cleanup() -> void:
 	for folder: String in ["res://fixtures/moved", "res://fixtures/mv_a", "res://fixtures/mv_b"]:
 		_remove_tree(ProjectSettings.globalize_path(folder))
 	BBPaths.forget_models_index()
+	# A test that crashed mid-way must not leave its mirror setting to the next one.
+	ProjectSettings.set_setting(BBPaths.SETTING_MODELS_MIRROR, null)
 
 
 func _remove_tree(path: String) -> void:

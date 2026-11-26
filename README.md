@@ -428,7 +428,8 @@ python tests/run_tests.py --regen-fixtures # regenerate test scenes
 ```
 
 You need Python 3, Godot and Blender (on `PATH`, in `$GODOT` / `$BLENDER`, or
-passed with `--godot` / `--blender`). On Linux the GUI suite needs `Xvfb`.
+passed with `--godot` / `--blender`). On Linux the GUI suite needs `Xvfb`;
+on Windows it is skipped, the rest runs the same way.
 Tests run in an isolated copy under `tests/.work` with their own Godot and
 Blender config, so they never touch your settings or your game project.
 

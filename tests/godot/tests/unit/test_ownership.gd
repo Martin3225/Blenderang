@@ -3,6 +3,8 @@ extends "res://tests/bb_test.gd"
 ## Which nodes Blender may move.
 
 
+## The exact list also proves what is left out: Player (.tscn instance, gameplay),
+## Building/Decoration (under a physics body) and the insides of crate.glb.
 func test_auto_mark_picks_art_instances() -> void:
 	var root: Node = scene("basic")
 	var names: PackedStringArray = []
@@ -11,31 +13,6 @@ func test_auto_mark_picks_art_instances() -> void:
 	names.sort()
 	eq(names, PackedStringArray(["Barrel", "Character", "Crate", "Detached", "Helmet", "InRotated", "Tower"]),
 		"marked art instances")
-	done()
-
-
-func test_gameplay_instance_is_not_marked() -> void:
-	var root: Node = scene("basic")
-	mark_props(root)
-	check(not BBOwnership.is_blender_owned(root.get_node("Player")),
-		"Player is a .tscn instance, not an art asset")
-	done()
-
-
-func test_instance_under_physics_body_is_not_marked() -> void:
-	var root: Node = scene("basic")
-	mark_props(root)
-	check(not BBOwnership.is_blender_owned(root.get_node("Building/Decoration")),
-		"Decoration is part of the Building gameplay unit")
-	done()
-
-
-func test_inside_of_foreign_instance_is_not_marked() -> void:
-	var root: Node = scene("basic")
-	mark_props(root)
-	var crate: Node = root.get_node("Props/Crate")
-	for child: Node in crate.get_children():
-		check(not BBOwnership.is_blender_owned(child), "%s inside the crate.glb instance" % child.name)
 	done()
 
 

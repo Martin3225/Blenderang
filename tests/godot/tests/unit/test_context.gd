@@ -178,7 +178,6 @@ func test_terrain_bake_is_cached() -> void:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://.pipeline"))
 	BBTerrain.albedo(terrain, aabb, base)
 	var signature: String = FileAccess.get_file_as_string(base + ".terrain.sig")
-	write_file(base + ".terrain.png.marker", "")
 	# Cache: a second call with the same terrain doesn't bake again.
 	var image: Image = Image.create_empty(1, 1, false, Image.FORMAT_RGB8)
 	image.save_png(ProjectSettings.globalize_path(base + ".terrain.png"))

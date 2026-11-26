@@ -120,12 +120,6 @@ class BuildSceneTest(BridgeCase):
 
     def test_library_source_is_linked_for_all_instances(self):
         source = write_source("crate.blend", "crate")
-        manifest = self.read_manifest()
-        for item in manifest["nodes"]:
-            if item.get("src", "").endswith("crate.glb"):
-                item["tier"] = "library"
-                item["src_blend"] = "fixtures/assets/crate.blend"
-        self.write_manifest(manifest)
         bpy.ops.wm.read_homefile(use_empty=True)
         self.open_scene()
         linked = {bpy.data.objects[n].instance_collection for n in ("Crate", "InRotated", "Detached")}
@@ -134,17 +128,6 @@ class BuildSceneTest(BridgeCase):
         self.assertIsNotNone(collection.library)
         self.assertTrue(bridge._same_file(bpy.path.abspath(collection.library.filepath), source))
         self.assertEqual(bpy.data.objects["Crate"].get(bridge.P_TIER), "library")
-
-    def test_declared_source_that_is_missing_falls_back_to_preview(self):
-        manifest = self.read_manifest()
-        crate = self.entry(manifest, "Crate")
-        crate["tier"] = "library"
-        crate["src_blend"] = "fixtures/assets/neexistuje.blend"
-        self.write_manifest(manifest)
-        self.open_scene()
-        obj = bpy.data.objects["Crate"]
-        self.assertEqual(obj.get(bridge.P_TIER), "none")
-        self.assertIsNotNone(obj.instance_collection)
 
     def test_terrain_is_real_mesh_in_world_space(self):
         if not os.path.exists(self.manifest_path("terrain")):
@@ -169,6 +152,39 @@ class BuildSceneTest(BridgeCase):
     def test_panel_lists_all_models(self):
         scene = self.open_scene()
         self.assertEqual([o.name for o in bridge.scene_models(scene)], list(MODELS))
+
+
+class SourceResolutionTest(BridgeCase):
+    """The same order as BBPaths in Godot (tests/godot/tests/unit/test_paths.gd):
+    personal → .bbsrc → .blend next to the asset → models folder."""
+
+    CRATE = "res://fixtures/assets/crate.glb"
+
+    def write_marker(self, stored: str) -> None:
+        with open(os.path.join(harness.ASSETS, "crate.glb.bbsrc"), "w", encoding="utf-8") as handle:
+            handle.write(stored)
+
+    def test_bbsrc_wins_over_sibling(self):
+        write_source("crate.blend", "crate")
+        elsewhere = write_source("../elsewhere.blend", "crate")
+        self.addCleanup(os.remove, elsewhere)
+        self.write_marker("fixtures/elsewhere.blend")
+        self.open_scene()
+        self.assertEqual(bpy.data.objects["Crate"].get(bridge.P_SRC_BLEND), "fixtures/elsewhere.blend")
+
+    def test_bbsrc_to_missing_file_is_none(self):
+        write_source("crate.blend", "crate")
+        self.write_marker("fixtures/missing.blend")
+        self.open_scene()
+        crate = bpy.data.objects["Crate"]
+        self.assertEqual(crate.get(bridge.P_TIER), "none", "a missing picked source isn't replaced by the convention")
+        self.assertIsNone(crate.instance_collection.library, ".glb preview")
+
+    def test_missing_personal_source_falls_back(self):
+        write_source("crate.blend", "crate")
+        bridge._write_local(harness.PROJECT, self.CRATE, "/nonexistent/crate.blend")
+        self.open_scene()
+        self.assertEqual(bpy.data.objects["Crate"].get(bridge.P_SRC_BLEND), "fixtures/assets/crate.blend")
 
 
 class ResilienceTest(BridgeCase):

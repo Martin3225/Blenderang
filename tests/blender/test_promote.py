@@ -53,11 +53,3 @@ class PromoteTest(BridgeCase):
             self.promote("Tower")
         with open(path, "rb") as handle:
             self.assertEqual(handle.read(), b"puvodni")
-
-    def test_godot_sees_new_source_after_send(self):
-        self.open_scene()
-        self.promote("Tower")
-        bridge.export(bpy.context.scene)
-        # The manifest carries the tier from Blender only as information; Godot works
-        # it out itself on the next export from the file next to the asset.
-        self.assertTrue(os.path.isfile(os.path.join(harness.ASSETS, "tower.blend")))

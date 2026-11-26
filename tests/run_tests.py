@@ -73,10 +73,14 @@ def find_godot(explicit: str | None) -> str:
 def find_blender(explicit: str | None) -> str:
     candidates = [explicit, os.environ.get("BLENDER"), shutil.which("blender")]
     if WINDOWS:
-        candidates += [
-            r"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe",
-            r"C:\Program Files (x86)\Steam\steamapps\common\Blender\blender.exe",
-        ]
+        # The newest installed version first ("Blender 5.3" before "Blender 4.5").
+        installed = sorted(
+            Path(r"C:\Program Files\Blender Foundation").glob("Blender */blender.exe"),
+            key=lambda exe: [int(p) for p in exe.parent.name.split()[-1].split(".") if p.isdigit()],
+            reverse=True,
+        )
+        candidates += [str(exe) for exe in installed]
+        candidates.append(r"C:\Program Files (x86)\Steam\steamapps\common\Blender\blender.exe")
     else:
         candidates += [
             str(Path.home() / ".local/share/Steam/steamapps/common/Blender/blender"),
