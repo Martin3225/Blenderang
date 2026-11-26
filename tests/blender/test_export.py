@@ -72,6 +72,30 @@ class ExportTest(BridgeCase):
         # A second send must not add it again.
         self.assertEqual(self.send()["added"], 0)
 
+    def test_duplicate_with_default_name(self):
+        self.open_scene()
+        copy = bpy.data.objects["Tower"].copy()
+        bpy.data.collections[bridge.COLL_LAYOUT].objects.link(copy)
+        self.assertEqual(copy.name, "Tower.001")
+        self.assertEqual(self.send()["added"], 1)
+        manifest = self.read_manifest()
+        self.assertEqual(self.entry(manifest, "Tower")["bb_id"], "id_tower")
+        self.assertNotEqual(self.entry(manifest, "Tower.001")["bb_id"], "id_tower")
+
+    def test_copy_named_before_the_original_gets_the_new_id(self):
+        self.open_scene()
+        copy = bpy.data.objects["Tower"].copy()
+        copy.name = "ATower"   # sorts before Tower
+        bpy.data.collections[bridge.COLL_LAYOUT].objects.link(copy)
+        copy.location.x += 5
+        counts = self.send()
+        self.assertEqual((counts["moved"], counts["added"]), (0, 1))
+        manifest = self.read_manifest()
+        original = self.entry(manifest, "Tower")
+        self.assertEqual(original["bb_id"], "id_tower", "the original keeps its Godot node")
+        self.assertAlmostEqual(original["xform"][9], -4.0, places=4)
+        self.assertNotEqual(self.entry(manifest, "ATower")["bb_id"], "id_tower")
+
     def test_delete_is_sent(self):
         self.open_scene()
         bpy.data.objects.remove(bpy.data.objects["Barrel"], do_unlink=True)
@@ -87,16 +111,6 @@ class ExportTest(BridgeCase):
         before = len(self.read_manifest()["nodes"])
         self.send()
         self.assertEqual(len(self.read_manifest()["nodes"]), before)
-
-    def test_pinned_entry_is_not_overwritten(self):
-        manifest = self.read_manifest()
-        self.entry(manifest, "Crate")["pinned"] = True
-        self.write_manifest(manifest)
-        self.open_scene()
-        bpy.data.objects["Crate"].location.x += 100
-        counts = self.send()
-        self.assertEqual(counts["pinned"], 1)
-        self.assertAlmostEqual(self.entry(self.read_manifest(), "Crate")["xform"][9], 2.0, places=4)
 
     def test_send_without_loaded_manifest_fails_cleanly(self):
         with self.assertRaises(bridge.BridgeError):

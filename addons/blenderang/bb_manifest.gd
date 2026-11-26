@@ -161,8 +161,6 @@ static func _prop_entry(node: Node, root: Node) -> Dictionary:
 		entry["src_blend_missing"] = BBPaths.expected_source_for(node.scene_file_path)
 	else:
 		entry["src_blend"] = source
-	if BBOwnership.is_pinned(node):
-		entry["pinned"] = true
 	if node3d != null and not node3d.visible:
 		entry["visible"] = false
 	return entry

@@ -175,14 +175,57 @@ func test_node_marked_after_export_is_not_deleted() -> void:
 	done()
 
 
-func test_pinned_node_is_not_moved() -> void:
+func test_malformed_transform_is_reported_not_applied() -> void:
 	var setup: Array = _setup()
 	var root: Node = setup[0]
-	root.get_node("Props/Crate").set_meta(BBOwnership.META_PINNED, true)
-	_set_origin(setup[2], "Crate", Vector3(50, 0, 50))
+	entry(setup[2], "Crate")["xform"] = [1.0, 2.0, 3.0]
+	var copy: Dictionary = entry(setup[2], "Tower").duplicate(true)
+	copy["bb_id"] = "id_broken"
+	copy["name"] = "Broken"
+	copy.erase("xform")
+	setup[2]["nodes"].append(copy)
 	var plan: BBApply.Plan = _apply(root, setup[2], setup[1])
-	eq(plan.pinned.size(), 1, "reported as pinned")
-	near(_world(root, "Props/Crate").origin, Vector3(2, 0, 3), "position unchanged")
+	eq(plan.unresolved.size(), 2, "both broken entries reported")
+	check(plan.is_empty(), "nothing moved, added or removed")
+	near(_world(root, "Props/Crate").origin, Vector3(2, 0, 3), "Crate didn't jump to the origin")
+	check(root.get_node_or_null("Props/Broken") == null, "no instance from a broken entry")
+	done()
+
+
+## No .last.json (deleted, or the manifest came from elsewhere): a model missing
+## from the manifest can't be told from one Blender never had, so nothing is removed.
+func test_missing_baseline_removes_nothing() -> void:
+	var setup: Array = _setup()
+	var root: Node = setup[0]
+	var kept: Array = []
+	for item: Dictionary in setup[2]["nodes"]:
+		if item.get("name") != "Barrel":
+			kept.append(item)
+	setup[2]["nodes"] = kept
+	_set_origin(setup[2], "Crate", Vector3(4, 0, 3))
+	var plan: BBApply.Plan = _apply(root, setup[2], {})
+	check(plan.removed.is_empty(), "nothing removed")
+	check(root.get_node_or_null("Props/Barrel") != null, "Barrel stayed")
+	near(_world(root, "Props/Crate").origin, Vector3(4, 0, 3), "moves still apply")
+	done()
+
+
+## Shift+D in Blender names the copy Tower.001; '.' isn't allowed in a Godot node name.
+func test_duplicate_with_blender_default_name() -> void:
+	var setup: Array = _setup()
+	var root: Node = setup[0]
+	var copy: Dictionary = entry(setup[2], "Tower").duplicate(true)
+	copy["bb_id"] = "id_tower_001"
+	copy["name"] = "Tower.001"
+	copy["xform"][9] = 7.0
+	setup[2]["nodes"].append(copy)
+	_apply(root, setup[2], setup[1])
+	var added: Node = root.get_node_or_null("Props/Tower_001")
+	check(added != null, "added as Tower_001 under Props")
+	if added != null:
+		eq(BBOwnership.get_id(added), "id_tower_001", "id")
+		near(_world(root, "Props/Tower_001").origin.x, 7.0, "position")
+	check(root.get_node_or_null("Props/Tower") != null, "the original is untouched")
 	done()
 
 

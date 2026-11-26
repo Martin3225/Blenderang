@@ -12,15 +12,14 @@ class Plan extends RefCounted:
 	var moved: Array[Dictionary] = []
 	var added: Array[Dictionary] = []
 	var removed: Array[Node] = []
-	var pinned: Array[String] = []
 	var unresolved: Array[String] = []
 
 	func is_empty() -> bool:
 		return moved.is_empty() and added.is_empty() and removed.is_empty()
 
 	func summary() -> String:
-		return "moved %d, added %d, removed %d, pinned %d, unresolved %d" % [
-			moved.size(), added.size(), removed.size(), pinned.size(), unresolved.size(),
+		return "moved %d, added %d, removed %d, unresolved %d" % [
+			moved.size(), added.size(), removed.size(), unresolved.size(),
 		]
 
 
@@ -45,14 +44,16 @@ static func plan(root: Node, manifest: Dictionary, baseline: Dictionary) -> Plan
 
 	for id: String in incoming:
 		var entry: Dictionary = incoming[id]
+		if not _has_xform(entry):
+			# A broken entry must not teleport the node to the origin; still
+			# counts as present, so it isn't removed either.
+			result.unresolved.append("%s has a malformed transform" % entry.get("name", id))
+			continue
 		var node: Node = by_id.get(id)
 		if node == null:
 			result.added.append(entry)
 			continue
-		if BBOwnership.is_pinned(node):
-			result.pinned.append(str(node.name))
-			continue
-		var target: Transform3D = _deserialize(entry.get("xform", []))
+		var target: Transform3D = _deserialize(entry["xform"])
 		var node3d: Node3D = node as Node3D
 		if node3d == null:
 			result.unresolved.append("%s is not a Node3D" % node.name)
@@ -77,7 +78,8 @@ static func _rescue_children(root: Node, result: Plan, incoming: Dictionary, by_
 		return
 	for id: String in incoming:
 		var node: Node = by_id.get(id)
-		if node == null or result.removed.has(node) or not _under_removed(node.get_parent(), root, result.removed):
+		if node == null or result.removed.has(node) or not _has_xform(incoming[id]) \
+				or not _under_removed(node.get_parent(), root, result.removed):
 			continue
 		var keeper: Node = node.get_parent()
 		while keeper != root and _under_removed(keeper, root, result.removed):
@@ -187,7 +189,7 @@ static func _build_add(root: Node, entry: Dictionary, plan_data: Plan, targets: 
 	node.set_meta(BBOwnership.META_ID, str(entry.get("bb_id", "")))
 	var node3d: Node3D = node as Node3D
 	if node3d != null:
-		node3d.transform = _to_local_under(parent, root, _deserialize(entry.get("xform", [])), targets)
+		node3d.transform = _to_local_under(parent, root, _deserialize(entry["xform"]), targets)
 	return {"kind": "add", "node": node, "parent": parent, "owner": root}
 
 
@@ -200,9 +202,12 @@ static func _index(manifest: Dictionary) -> Dictionary:
 	return result
 
 
+static func _has_xform(entry: Dictionary) -> bool:
+	var xform: Variant = entry.get("xform")
+	return xform is Array and (xform as Array).size() == 12
+
+
 static func _deserialize(xform: Array) -> Transform3D:
-	if xform.size() != 12:
-		return Transform3D.IDENTITY
 	return Transform3D(
 		Vector3(xform[0], xform[1], xform[2]),
 		Vector3(xform[3], xform[4], xform[5]),

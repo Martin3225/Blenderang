@@ -7,10 +7,9 @@ extends RefCounted
 ## reference for it.
 
 const META_ID: StringName = &"bb_id"
-const META_PINNED: StringName = &"bb_pinned"
 const META_ROOT: StringName = &"bb_root"
 ## All the bridge's metadata on a node.
-const MARKS: Array[StringName] = [META_ID, META_PINNED, META_ROOT]
+const MARKS: Array[StringName] = [META_ID, META_ROOT]
 
 ## Extensions of sources typically authored in Blender. Only a hint for
 ## bulk marking, not a criterion of ownership.
@@ -19,10 +18,6 @@ const ART_EXTENSIONS: PackedStringArray = ["glb", "gltf", "fbx", "blend", "obj"]
 
 static func is_blender_owned(node: Node) -> bool:
 	return node.has_meta(META_ID)
-
-
-static func is_pinned(node: Node) -> bool:
-	return node.get_meta(META_PINNED, false)
 
 
 static func is_layout_root(node: Node) -> bool:

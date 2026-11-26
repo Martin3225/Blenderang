@@ -271,7 +271,6 @@ Godot and disappear the next time you open the scene.
 
 Mark or unmark nodes manually with
 `Project ▸ Tools ▸ Blenderang ▸ Mark selection / Unmark selection`.
-Add the metadata `bb_pinned` to a node to stop Blender from moving it.
 
 ### Where model sources live
 
@@ -416,7 +415,7 @@ You can commit `.pipeline/` or ignore it. Everything in it can be rebuilt.
 | Clicking **Blender** does nothing | Check the Blender path in Editor Settings. |
 | Blender opens but the panel says to open a scene from Godot | The Blender extension isn't enabled, or the versions don't match. |
 | A model shows as an empty axis | Its `.glb` failed to load. The panel lists the error in red. |
-| My edits didn't come back to Godot | Only nodes with `bb_id` are updated. Check that the node is marked and not `bb_pinned`. |
+| My edits didn't come back to Godot | Only nodes with `bb_id` are updated. Check that the node is marked. |
 
 ## Running the tests
 

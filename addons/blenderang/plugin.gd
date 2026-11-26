@@ -372,14 +372,12 @@ func _import(root: Node, automatic: bool) -> void:
 	var baseline: Dictionary = BBApply.read_json(BBManifest.baseline_path(root))
 	var plan: BBApply.Plan = BBApply.plan(root, manifest, baseline)
 	if plan.is_empty():
-		if not automatic:
+		if not automatic and plan.unresolved.is_empty():
 			print("Blenderang: no changes.")
-		return
-	BBApply.commit(root, BBApply.operations(root, plan), get_undo_redo())
-	BBManifest.store(BBManifest.baseline_path(root), JSON.stringify(manifest, "\t"))
-	_known_md5[path] = FileAccess.get_md5(path)
-	print("Blenderang: from Blender %s (Ctrl+Z to undo)" % plan.summary())
+	else:
+		BBApply.commit(root, BBApply.operations(root, plan), get_undo_redo())
+		BBManifest.store(BBManifest.baseline_path(root), JSON.stringify(manifest, "\t"))
+		_known_md5[path] = FileAccess.get_md5(path)
+		print("Blenderang: from Blender %s (Ctrl+Z to undo)" % plan.summary())
 	for problem: String in plan.unresolved:
 		push_warning("Blenderang: %s" % problem)
-	for name: String in plan.pinned:
-		push_warning("Blenderang: %s is pinned in Godot, change from Blender ignored." % name)

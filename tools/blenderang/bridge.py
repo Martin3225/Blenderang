@@ -552,18 +552,19 @@ def export(scene: bpy.types.Scene) -> dict[str, int]:
     nodes: list[dict[str, Any]] = [
         entry for entry in manifest["nodes"] if entry.get("owner") != "blender"
     ]
-    counts = {"kept": 0, "moved": 0, "added": 0, "removed": 0, "pinned": 0}
+    counts = {"kept": 0, "moved": 0, "added": 0, "removed": 0}
     taken: set[str] = set()
 
-    for obj in scene_models(scene):
+    # Shift+D copies the id too. The object still named as the entry was sent is
+    # the original, whatever the copy is called; otherwise the copy would take over
+    # the Godot node and the original would come back as a new instance.
+    models = sorted(scene_models(scene),
+                    key=lambda obj: originals.get(str(obj.get(P_ID, "")), {}).get("name") != obj.name)
+    for obj in models:
         entry, is_new = _entry_for(obj, originals, taken)
         if entry is None:
             continue
         taken.add(entry["bb_id"])
-        if entry.get("pinned"):
-            counts["pinned"] += 1
-            nodes.append(entry)
-            continue
         xform = blender_to_godot(obj.matrix_world)
         if is_new:
             counts["added"] += 1
@@ -607,8 +608,8 @@ def _entry_for(
     """Manifest entry for an object.
 
     Duplicating an object in Blender also copies its custom properties, id included.
-    Collisions are therefore resolved here, at export; earlier there's no reliable
-    way to decide which copy is the original.
+    Collisions are therefore resolved here, at export: the first object with the
+    id keeps it, so ``export`` visits the one with the entry's name first.
     """
     current = str(obj.get(P_ID, ""))
     source = originals.get(current)
@@ -627,7 +628,6 @@ def _entry_for(
     obj[P_ID] = fresh
     template["bb_id"] = fresh
     template["path"] = "%s/%s" % (template.get("parent", "."), obj.name)
-    template.pop("pinned", None)
     return template, True
 
 
