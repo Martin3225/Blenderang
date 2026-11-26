@@ -34,6 +34,11 @@ const LOCAL_DIR: String = "res://.pipeline/local"
 const LOCAL_SOURCES: String = "res://.pipeline/local/sources.json"
 ## Personal settings: where the models folder is on this disk.
 const LOCAL_SETTINGS: String = "res://.pipeline/local/settings.json"
+## Project setting, shared by the team: the folder of the project the models folder
+## mirrors. With the default, the source of [code]res://assets/levels/castle.glb[/code]
+## is [code]levels/castle.blend[/code] in the models folder. Blender reads it from project.godot.
+const SETTING_MODELS_MIRROR: String = "blenderang/models/project_folder"
+const DEFAULT_MODELS_MIRROR: String = "assets"
 
 ## [code].blend[/code] files in the models folder by lowercase name; built once
 ## per manifest export (see [method forget_models_index]).
@@ -140,9 +145,36 @@ static func set_models_folder(absolute_path: String) -> bool:
 	return _write_local_json(LOCAL_SETTINGS, settings)
 
 
+## Registers the shared settings so they show up in Project Settings. A value equal
+## to the default isn't saved to project.godot.
+static func register_settings() -> void:
+	if not ProjectSettings.has_setting(SETTING_MODELS_MIRROR):
+		ProjectSettings.set_setting(SETTING_MODELS_MIRROR, DEFAULT_MODELS_MIRROR)
+	ProjectSettings.set_initial_value(SETTING_MODELS_MIRROR, DEFAULT_MODELS_MIRROR)
+	ProjectSettings.add_property_info({"name": SETTING_MODELS_MIRROR, "type": TYPE_STRING})
+	ProjectSettings.set_as_basic(SETTING_MODELS_MIRROR, true)
+
+
+## The project folder the models folder mirrors, without slashes; may be empty.
+static func models_mirror() -> String:
+	return str(ProjectSettings.get_setting(SETTING_MODELS_MIRROR, DEFAULT_MODELS_MIRROR)) \
+			.replace("\\", "/").lstrip("/").rstrip("/")
+
+
+## Where the asset's source sits in the models folder by convention: the asset's
+## path without the mirrored project folder ([code]res://assets/levels/castle.glb[/code]
+## → [code]levels/castle.blend[/code]). Assets outside that folder keep their whole path.
+static func models_relative(asset_path: String) -> String:
+	var expected: String = expected_source_for(asset_path)
+	var mirror: String = models_mirror()
+	if not mirror.is_empty() and expected.begins_with(mirror + "/"):
+		return expected.substr(mirror.length() + 1)
+	return expected
+
+
 ## [code]models://…[/code] path of [code]<asset name>.blend[/code] in the models folder,
 ## or empty. The name is matched case-insensitively at any depth. With several
-## matches the one at the asset's own path ([code]levels/castle/castle.blend[/code])
+## matches the one at the asset's mirrored path ([method models_relative])
 ## wins, otherwise the first alphabetically; pick the source by hand to be explicit.
 static func find_in_models_folder(asset_path: String) -> String:
 	var folder: String = models_folder()
@@ -151,10 +183,10 @@ static func find_in_models_folder(asset_path: String) -> String:
 	if folder != _models_index_folder:
 		_models_index = _index_models(folder)
 		_models_index_folder = folder
-	var matches: Array = _models_index.get(expected_source_for(asset_path).get_file().to_lower(), [])
+	var mirrored: String = models_relative(asset_path)
+	var matches: Array = _models_index.get(mirrored.get_file().to_lower(), [])
 	if matches.is_empty():
 		return ""
-	var mirrored: String = expected_source_for(asset_path)
 	if matches.has(mirrored):
 		return MODELS_PREFIX + mirrored
 	if matches.size() > 1:

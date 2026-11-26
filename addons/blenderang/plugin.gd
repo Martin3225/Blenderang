@@ -76,6 +76,7 @@ func _enter_tree() -> void:
 	_watch.start()
 
 	BBTerrain.register_settings()
+	BBPaths.register_settings()
 
 	var filesystem: EditorFileSystem = EditorInterface.get_resource_filesystem()
 	filesystem.resources_reimporting.connect(_on_reimporting)

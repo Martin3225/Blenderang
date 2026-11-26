@@ -435,6 +435,22 @@ class ModelsFolderTest(BridgeCase):
         self.assertEqual(bpy.ops.bb.edit_source(name="Tower"), {"FINISHED"})
         self.assertTrue(bridge._same_file(bpy.data.filepath, created))
 
+    def test_models_folder_mirrors_a_project_folder(self):
+        root = os.path.join(os.path.dirname(harness.PROJECT), "mirror_project")
+        os.makedirs(root, exist_ok=True)
+        self.addCleanup(shutil.rmtree, root, True)
+        godot = os.path.join(root, "project.godot")
+        with open(godot, "w", encoding="utf-8") as handle:
+            handle.write('config_version=5\n\n[application]\n\nconfig/name="x"\n')
+        self.assertEqual(bridge.models_relative(root, "res://assets/levels/castle.glb"), "levels/castle.blend",
+                         "by default assets/ is mirrored, same as Godot")
+        self.assertEqual(bridge.models_relative(root, "res://props/crate.glb"), "props/crate.blend",
+                         "an asset outside it keeps its whole path")
+        with open(godot, "a", encoding="utf-8") as handle:
+            handle.write('\n[blenderang]\n\nmodels/project_folder="/art/"\n')
+        self.assertEqual(bridge.models_relative(root, "res://art/levels/castle.glb"), "levels/castle.blend")
+        self.assertEqual(bridge.models_asset(root, "levels/castle.blend"), "res://art/levels/castle.glb")
+
 
 class TerrainMaterialTest(BridgeCase):
     def test_terrain_has_textured_material(self):

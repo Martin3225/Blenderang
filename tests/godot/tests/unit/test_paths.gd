@@ -176,6 +176,23 @@ func test_models_folder_mirrored_path_breaks_ties() -> void:
 	done()
 
 
+func test_models_folder_mirrors_a_project_folder() -> void:
+	_cleanup()
+	_library_file("assets/crate.blend")
+	_library_file("a/crate.blend")
+	BBPaths.set_models_folder(_library)
+	eq(BBPaths.models_relative("res://assets/levels/castle.glb"), "levels/castle.blend", "by default assets/ is mirrored")
+	eq(BBPaths.models_relative(ASSET), "fixtures/assets/crate.blend", "an asset outside it keeps its whole path")
+	ProjectSettings.set_setting(BBPaths.SETTING_MODELS_MIRROR, "/fixtures/")
+	BBPaths.forget_models_index()
+	eq(BBPaths.source_for(ASSET), "models://assets/crate.blend", "the mirrored path wins, same as Blender")
+	ProjectSettings.set_setting(BBPaths.SETTING_MODELS_MIRROR, "")
+	eq(BBPaths.models_relative(ASSET), "fixtures/assets/crate.blend", "empty: nothing is stripped")
+	ProjectSettings.set_setting(BBPaths.SETTING_MODELS_MIRROR, null)
+	_cleanup()
+	done()
+
+
 func test_choose_in_models_folder_is_shared_relative() -> void:
 	_cleanup()
 	var picked: String = _library_file("props/crate_v2.blend")

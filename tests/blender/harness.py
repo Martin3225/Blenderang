@@ -57,9 +57,10 @@ class BridgeCase(unittest.TestCase):
             if os.path.isfile(source):
                 shutil.copyfile(source, os.path.join(PIPELINE, name))
         shutil.rmtree(os.path.join(PIPELINE, "local"), ignore_errors=True)
-        pointer = os.path.join(bpy.utils.user_resource("CONFIG"), "blenderang_edit.json")
-        if os.path.exists(pointer):
-            os.remove(pointer)
+        for config in ("blenderang_edit.json", "blenderang_projects.json"):
+            pointer = os.path.join(bpy.utils.user_resource("CONFIG"), config)
+            if os.path.exists(pointer):
+                os.remove(pointer)
         for name in os.listdir(ASSETS):
             path = os.path.join(ASSETS, name)
             if name.endswith((".blend", ".blend1", ".bbsrc")):

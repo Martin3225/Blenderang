@@ -41,7 +41,7 @@ class BB_PT_probe(blenderang.BB_PT_panel):
     bl_category = "Item"
 
     def draw(self, context):
-        mode = "edit" if bridge.edit_session() else ("scene" if context.scene.get(bridge.S_MANIFEST) else "empty")
+        mode = "edit" if bridge.file_root() else ("scene" if context.scene.get(bridge.S_MANIFEST) else "empty")
         try:
             super().draw(context)
             drawn.append((mode, None))
@@ -177,10 +177,32 @@ def step_back_in_scene():
     drawn.clear()
     ok, message = panel_drew("detail")
     record("detail with a personal source draws", ok, message)
+    return 1.0
+
+
+def step_open_unlinked_file():
+    path = os.path.join(options["--project"], "fixtures", "assets", "gui_lamp.blend")
+    collection = bpy.data.collections.new("gui_lamp")
+    collection.objects.link(bpy.data.objects.new("gui_lamp_body", None))
+    bpy.data.libraries.write(path, {collection}, fake_user=True)
+    bpy.ops.wm.open_mainfile(filepath=path)
+    return 1.0
+
+
+def step_unlinked_file():
+    drawn.clear()
+    ok, message = panel_drew("empty")
+    record("unlinked file panel draws", ok, message)
+    root, asset = bridge.project_for(bpy.data.filepath)
+    record("link to Godot", bpy.ops.bb.link_to_godot(auto=False, project=root, target=asset) == {"FINISHED"})
+    drawn.clear()
+    ok, message = panel_drew("edit")
+    record("linked file panel with the Godot status draws", ok, message)
     return None
 
 
-STEPS = [step_scene_opened, step_promote_and_edit, step_in_edit, step_back_in_scene]
+STEPS = [step_scene_opened, step_promote_and_edit, step_in_edit, step_back_in_scene,
+         step_open_unlinked_file, step_unlinked_file]
 
 
 def run_steps():

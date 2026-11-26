@@ -170,11 +170,61 @@ To edit a model without a scene, right-click its `.glb` / `.fbx` in Godot's
 FileSystem dock and choose **Open source in Blender**. `Ctrl+S` there
 re-exports the asset into your project the same way.
 
-The source-to-asset binding is kept in your Blender user configuration even
-after **Save and return to scene**. Reopening that `.blend` by hand with
-Blenderang enabled still re-exports on `Ctrl+S`, without restoring the old
-scene context. The binding is local to your machine, not stored in the shared
-`.blend`.
+A source stays linked to its asset after **Save and return to scene**: the
+link is stored in the `.blend` itself. Reopening it by hand with Blenderang
+enabled still re-exports on `Ctrl+S`, without restoring the old scene context.
+The **Auto save to Godot** switch in the panel turns the export on save off and
+on again for the whole file; it's saved in the `.blend`, so it's the same for
+everyone. **Export now** exports without saving.
+
+### Export a new model
+
+A `.blend` you made yourself, not from Godot, can export into the game too:
+
+1. Save it in the models folder (or in the Godot project).
+2. In the Blenderang panel, click **Link to Godot** (export with **Export now**)
+   or **Auto save to Godot** (`Ctrl+S` exports too). It offers the Godot
+   project, the models folder and the `.glb`, all editable and with a file
+   browser: the project folder + `assets/` + the file's path in the models
+   folder (`<models folder>/props/lamp.blend` → `res://assets/props/lamp.glb`;
+   next to the `.blend` when it lies in the project itself). Outside the
+   models folder the path is only a guess from the file's name, and the
+   dialog says so. The models folder you set here is saved for the Godot
+   project, only for you, and Godot uses it too.
+3. The active collection gets a glTF exporter (with *Apply modifiers* on). If
+   the Scene Collection is active, a collection named after the file is
+   created and the scene's objects move into it.
+
+The panel shows what the export means in Godot: whether the `.glb` already
+exists (and gets overwritten) and whether Godot finds this `.blend` as its
+source, so **Edit** in Godot opens it. Godot finds a source by name, so a
+`.blend` under another name (Save As, incremental save, renamed in the file
+manager) keeps exporting to the same `.glb` but shows a warning; pick it as
+the source in Godot or name it after the `.glb`.
+
+Blender knows a Godot project once it has opened it from Godot; you can also
+add or remove projects in `Preferences ▸ Add-ons ▸ Blenderang`. The `assets`
+folder is a project setting, `Project Settings ▸ Blenderang ▸ Models ▸ Project
+Folder`; leave it empty if the models folder mirrors the whole project.
+
+### What is shared and what is yours
+
+Only where the repositories are on your disk is personal; everything else is
+shared through the files:
+
+| what | where | shared |
+|---|---|---|
+| Godot projects on this disk | Blender config, `blenderang_projects.json` | no |
+| models folder on this disk | `.pipeline/local/settings.json` in the Godot project | no |
+| sources outside both repositories | `.pipeline/local/sources.json` | no |
+| the asset a model exports to (`res://…`), the Godot project's name, Auto save | the `.blend`, on the model's collection | yes |
+| the exporter's path | the `.blend`, relative to it (`//…`) | yes |
+| a source picked by hand | `<asset>.bbsrc` | yes |
+
+A `.blend` finds its Godot project by where it lies (in the project or its
+models folder), otherwise by the project's name. While you edit a model from a
+scene, Blender keeps the scene to return to in `blenderang_edit.json`; the
+entry is removed when you return.
 
 ## How it works
 
@@ -225,19 +275,24 @@ Everyone can keep the folder somewhere else; the location is saved only for
 you (`.pipeline/local/settings.json`). When a model has no `.blend` next to its
 asset, Blenderang searches the folder for `<asset name>.blend` at any depth
 (case-insensitive, hidden folders like `.git` skipped). If several files have
-that name, the one at the asset's own path wins
-(`<models folder>/levels/castle/castle.blend` for `res://levels/castle/castle.glb`),
-otherwise the first alphabetically, and Blender warns about it.
+that name, the one at the asset's mirrored path wins, otherwise the first
+alphabetically, and Blender warns about it.
+
+The models folder mirrors the project's `assets/` folder (set in
+`Project Settings ▸ Blenderang ▸ Models ▸ Project Folder`): the mirrored path
+of `res://assets/levels/castle/castle.glb` is
+`<models folder>/levels/castle/castle.blend`. Assets outside `assets/` keep
+their whole path (`res://levels/castle.glb` → `<models folder>/levels/castle.blend`).
 
 With a models folder set, **Make source** creates the new `.blend` in it, at
-the asset's own path, instead of next to the asset in the game project.
+the mirrored path, instead of next to the asset in the game project.
 
 #### Picking a source by hand
 
-If your source is somewhere else, or one `.blend` holds several models, pick
-it by hand with **Pick source** in Blender (model list, **Detail** or `Tab` on
-the model) or `Project ▸ Tools ▸ Blenderang ▸ Pick source .blend for
-selection…` in Godot. The file browser starts in the models folder when one is set.
+If your source is somewhere else, pick it by hand with **Pick source** in
+Blender (model list, **Detail** or `Tab` on the model) or `Project ▸ Tools ▸
+Blenderang ▸ Pick source .blend for selection…` in Godot. The file browser
+starts in the models folder when one is set.
 
 | where the picked `.blend` is | stored in | who sees it |
 |---|---|---|
@@ -250,20 +305,34 @@ to the asset, then the name search in the models folder.
 
 ### Export settings
 
-Each source exports with Blender's own glTF **Collection Exporter**: the
-collection named after the asset (`crate` for `crate.glb`) is written to the
-asset's path. When you edit a model, the panel shows that exporter with all of
-Blender's glTF options (the same as `Properties ▸ Collection ▸ Exporters`),
-including **Export All** to re-export without saving. The settings are saved
-inside the source `.blend`; Blenderang only keeps the file path pointing at the
-asset. New sources start with the defaults from
-`Preferences ▸ Add-ons ▸ Blenderang` (apply modifiers, +Y up, …), and
-**Reset to defaults** applies them again.
+A model in a `.blend` is a **collection with a glTF exporter** (Blender's own
+Collection Exporter, `Properties ▸ Collection ▸ Exporters`). The exporter's path
+decides which asset it is; the collection can have any name. Blenderang
+doesn't add settings of its own: what you set in the exporter is what's
+exported, and it's saved in the `.blend`. The panel lists the file's models;
+click one to show its exporter with all of Blender's glTF options, including
+**Export All** to re-export without saving.
+
+The exporter's path is absolute and differs on every disk, so Blenderang also
+stores it on the collection as a `res://` path and points the exporter at the
+project wherever it lies on your disk when the file opens.
+
+**Make source** turns *Apply modifiers* on; a source you made by hand keeps
+Blender's defaults (it's off there), so switch it on if you use booleans.
+
+**Several models in one `.blend`:** give each its own collection with its own
+exporter. `Ctrl+S` exports all of them, and each asset in Godot links the
+collection that exports it. Several exporters on one collection export the
+same model several times (say `.glb` and `.fbx`).
 
 Helper objects that shouldn't end up in the `.glb` (boolean cutters, guides)
-go in a separate collection *next to* the asset collection, not inside it.
-Modifiers still use them, and they don't show up when the model is linked
-into a scene.
+go in a separate collection without an exporter, *next to* the model
+collection, not inside it. Modifiers still use them, and they don't show up
+when the model is linked into a scene.
+
+Sources from before this worked by the collection's name: if no exporter
+writes the asset, the collection named after it (`crate` for `crate.glb`) is
+used, otherwise the first one, and it gets an exporter when you edit it.
 
 > **Shape keys:** glTF export drops shape keys on meshes that have
 > modifiers when *Apply modifiers* is on. Turn it off for that model if you

@@ -26,6 +26,17 @@ P_PARENT = "bb_parent"
 P_SRC_BLEND = "bb_src_blend"
 P_PREVIEW = "bb_preview"
 
+# On a collection in a source .blend, all shared with the team:
+# C_ASSET: the asset its glTF exporter writes, as a ``res://`` path. The exporter's
+#   own path is relative to the .blend and differs between disks; it's rebuilt from this.
+# C_PROJECT: the Godot project's name (``config/name``), to find the project on this
+#   disk when the .blend lies outside it and its models folder.
+# C_AUTO: saving the .blend exports the model (default on).
+# Together they make the .blend "linked": nothing about it is kept on this machine.
+C_ASSET = "bb_asset"
+C_PROJECT = "bb_project"
+C_AUTO = "bb_auto_export"
+
 S_MANIFEST = "bb_manifest"
 S_ROOT = "bb_project_root"
 S_WARNINGS = "bb_warnings"
@@ -150,28 +161,58 @@ def _same_file(left: str, right: str) -> bool:
     return os.path.normcase(os.path.abspath(left)) == os.path.normcase(os.path.abspath(right))
 
 
-def _link_library_collection(blend_path: str, name: str) -> bpy.types.Collection:
-    """Links the collection from the source .blend. Repeated calls don't link again."""
-    for collection in bpy.data.collections:
-        library = collection.library
-        if library is None:
-            continue
-        if _same_file(bpy.path.abspath(library.filepath), blend_path) and collection.name == name:
-            return collection
-    with bpy.data.libraries.load(blend_path, link=True) as (data_from, data_to):
-        available = list(data_from.collections)
-        if not available:
-            raise BridgeError("%s contains no collection" % blend_path)
-        data_to.collections = [_pick_collection(available, name)]
-    linked = data_to.collections[0]
-    if linked is None:
+def _link_library_collection(blend_path: str, asset_src: str, root: str) -> bpy.types.Collection:
+    """Links the collection that exports the asset from the source .blend.
+
+    All collections of the file are linked once (the exporter is needed to tell
+    which one is the asset); repeated calls reuse them.
+    """
+    linked = [c for c in bpy.data.collections
+              if c.library is not None and _same_file(bpy.path.abspath(c.library.filepath), blend_path)]
+    if not linked:
+        with bpy.data.libraries.load(blend_path, link=True) as (data_from, data_to):
+            if not data_from.collections:
+                raise BridgeError("%s contains no collection" % blend_path)
+            data_to.collections = list(data_from.collections)
+        linked = [c for c in data_to.collections if c is not None]
+    chosen = model_collection(linked, asset_src, root)
+    if chosen is None:
         raise BridgeError("could not link a collection from %s" % blend_path)
-    return linked
+    return chosen
 
 
-def _pick_collection(available: list[str], name: str) -> str:
-    """The collection named after the asset, otherwise the first one in the file."""
-    return name if name in available else available[0]
+def exported_asset(collection: bpy.types.Collection, root: str) -> str:
+    """``res://`` path the collection exports to, or empty when it isn't in the project."""
+    stored = str(collection.get(C_ASSET, ""))
+    if stored:
+        return stored
+    exporter = gltf_exporter(collection)
+    if exporter is None or not exporter.filepath or not root:
+        return ""
+    inside = _relative_inside(bpy.path.abspath(exporter.filepath, library=collection.library), root)
+    return "res://" + inside if inside else ""
+
+
+def model_collection(collections: list[bpy.types.Collection], asset_src: str, root: str) -> bpy.types.Collection | None:
+    """The collection that is the asset's model.
+
+    The one whose exporter writes the asset; then one whose exporter writes a
+    file of that name (the project is elsewhere on this disk); for sources
+    without exporters the one named after the asset, otherwise the first
+    collection that doesn't export anything else.
+    """
+    collections = list(collections)
+    for collection in collections:
+        if exported_asset(collection, root) == asset_src:
+            return collection
+    name = os.path.basename(asset_src).lower()
+    for collection in collections:
+        exporter = gltf_exporter(collection)
+        if exporter is not None and os.path.basename(exporter.filepath.replace("\\", "/")).lower() == name:
+            return collection
+    stem = name.rsplit(".", 1)[0]
+    free = [c for c in collections if not len(c.exporters)]
+    return next((c for c in free if c.name.lower() == stem), free[0] if free else None)
 
 
 # The glTF importer creates helper objects for armature bone shapes
@@ -281,9 +322,8 @@ def _resolve_source(entry: dict[str, Any], root: str) -> tuple[bpy.types.Collect
     and the stored path of the source, if there is one."""
     stored = source_of(entry, root)
     if stored:
-        stem = os.path.basename(entry.get("src", "")).rsplit(".", 1)[0]
         try:
-            return _link_library_collection(source_abs(root, stored), stem), stored
+            return _link_library_collection(source_abs(root, stored), entry.get("src", ""), root), stored
         except (OSError, BridgeError) as error:
             # A broken or empty .blend must not crash opening the whole scene.
             print("Blenderang: cannot load source %s (%s), using the .glb preview" % (stored, error))
@@ -354,6 +394,7 @@ def build(scene: bpy.types.Scene, manifest_path: str) -> dict[str, int]:
     forget_models_index()   # the models folder may have changed (git pull)
     manifest = load_manifest(manifest_path)
     root = project_root_for(manifest_path)
+    remember_project(root)
 
     _clear_previous(scene)
     layout = _ensure_collection(scene.collection, COLL_LAYOUT)
@@ -603,37 +644,6 @@ def asset_abs(root: str, asset_src: str) -> str:
     return os.path.join(root, asset_src.replace("res://", "", 1))
 
 
-# glTF export options the add-on sets and shows in the panel. The defaults
-# apply to new sources; the user changes them in the add-on preferences.
-EXPORT_DEFAULTS: dict[str, Any] = {
-    "export_apply": True,
-    "export_yup": True,
-    "export_materials": "EXPORT",
-    "export_image_format": "AUTO",
-    "export_animations": True,
-    "export_skins": True,
-    "export_morph": True,
-    "export_tangents": False,
-    "export_extras": False,
-    "export_draco_mesh_compression_enable": False,
-}
-
-# A collection the default export settings have already been applied to once.
-# After that, whatever the source has saved applies and preferences don't overwrite it.
-C_EXPORT_SET = "bb_export_set"
-
-
-def export_defaults() -> dict[str, Any]:
-    """Default export options from the add-on preferences (built-in ones without them)."""
-    defaults = dict(EXPORT_DEFAULTS)
-    addon = bpy.context.preferences.addons.get(__package__ or "")
-    if addon is not None:
-        for key in defaults:
-            if hasattr(addon.preferences, key):
-                defaults[key] = getattr(addon.preferences, key)
-    return defaults
-
-
 def gltf_exporter(collection: bpy.types.Collection) -> bpy.types.CollectionExport | None:
     exporter = next((e for e in collection.exporters if e.name.lower().startswith("gltf")), None)
     if exporter is None and len(collection.exporters):
@@ -641,51 +651,115 @@ def gltf_exporter(collection: bpy.types.Collection) -> bpy.types.CollectionExpor
     return exporter
 
 
-def apply_export_settings(collection: bpy.types.Collection, settings: dict[str, Any]) -> None:
-    """Writes the options into the collection's exporter; they're saved with the source .blend."""
-    exporter = gltf_exporter(collection)
-    if exporter is None:
-        return
-    props = exporter.export_properties
-    for key, value in settings.items():
-        if not hasattr(props, key):
-            continue   # different version of the glTF add-on
-        try:
-            setattr(props, key, value)
-        except (TypeError, ValueError):
-            warn("export: option %s=%r cannot be set" % (key, value))
-    collection[C_EXPORT_SET] = True
-
-
-def ensure_exporter(collection: bpy.types.Collection, target: str) -> None:
-    """Collection Exporter to glTF at the asset's path.
-
-    The path is always set again: ``bpy.data.libraries.write`` doesn't save it into
-    the new file, and an empty path would export elsewhere (by collection name).
-
-    The collection gets the default options (mainly applying modifiers) only once:
-    a new source, and an older source that doesn't have them yet. Further changes
-    in the panel stay in the source.
-    """
+def set_export_target(collection: bpy.types.Collection, target: str, root: str,
+                      blend_path: str = "") -> bpy.types.CollectionExport:
+    """Points the collection's glTF exporter at the file, adding one with Blender's
+    defaults when it has none. The path is relative to ``blend_path`` (default:
+    the open file). Inside the project the ``res://`` path and the project's name
+    are kept on the collection too, so the .blend exports to the right place on
+    every disk."""
     exporter = gltf_exporter(collection)
     if exporter is None:
         with bpy.context.temp_override(collection=collection):
             bpy.ops.collection.exporter_add(name="IO_FH_gltf2")
         exporter = collection.exporters[-1]
-    exporter.filepath = target
+    # Blender copies it into export_properties.
+    exporter.filepath = _export_path(target, blend_path or bpy.data.filepath)
     props = exporter.export_properties
-    props.filepath = target
     if hasattr(props, "export_format"):
         props.export_format = "GLTF_SEPARATE" if target.lower().endswith(".gltf") else "GLB"
-    if not collection.get(C_EXPORT_SET):
-        apply_export_settings(collection, export_defaults())
+    _share_target(collection, _relative_inside(target, root) if root else "", root)
+    return exporter
+
+
+def _share_target(collection: bpy.types.Collection, inside: str, root: str) -> None:
+    """Stores where the collection exports in the project (``inside``, relative to
+    ``root``), or clears it for an exporter writing outside the project."""
+    if not inside:
+        collection.pop(C_ASSET, None)
+        collection.pop(C_PROJECT, None)
+        return
+    for key, value in ((C_ASSET, "res://" + inside), (C_PROJECT, project_name(root))):
+        if collection.get(key) != value:
+            collection[key] = value
+
+
+def _export_path(target: str, blend_path: str) -> str:
+    """Exporter path for an absolute target: relative to the .blend (``//…``), so
+    the shared file holds no path from one person's disk. Absolute while the .blend
+    isn't saved, lies on another drive, or was opened through Flatpak's document
+    portal (its folder there holds nothing else)."""
+    if not blend_path or host_path(blend_path) != blend_path:
+        return target
+    try:
+        relative = os.path.relpath(target, os.path.dirname(os.path.abspath(blend_path)))
+    except ValueError:   # Windows: a different drive
+        return target
+    return "//" + relative.replace(os.sep, "/")
+
+
+def model_collections() -> list[bpy.types.Collection]:
+    """The models of the open .blend: its own collections with an exporter."""
+    return [c for c in bpy.data.collections
+            if c.library is None and len(c.exporters) and c.name != COLL_CONTEXT and not c.get(P_PREVIEW)]
+
+
+def linked_models() -> list[bpy.types.Collection]:
+    """Models exporting into a Godot project (they carry its ``res://`` path)."""
+    return [c for c in model_collections() if c.get(C_ASSET)]
+
+
+def localize_export_paths(root: str, blend_path: str = "") -> None:
+    """Exporter paths rebuilt from the shared ``res://`` paths for the project as
+    it lies on this disk, relative to ``blend_path`` (default: the open file)."""
+    blend_path = blend_path or bpy.data.filepath
+    for collection in linked_models():
+        exporter = gltf_exporter(collection)
+        if exporter is not None:
+            path = _export_path(asset_abs(root, str(collection[C_ASSET])), blend_path)
+            if exporter.filepath != path:
+                exporter.filepath = path
+
+
+def remember_export_paths(root: str) -> None:
+    """Before saving: the ``res://`` path of every exporter writing into the
+    project, so the shared .blend finds the asset on another disk too. An
+    exporter pointed outside the project keeps only its own path."""
+    for collection in model_collections():
+        exporter = gltf_exporter(collection)
+        if exporter is not None and exporter.filepath:
+            _share_target(collection, _relative_inside(bpy.path.abspath(exporter.filepath), root), root)
 
 
 def export_collection(collection: bpy.types.Collection) -> None:
-    """Exports the collection with its exporter. ``wm.collection_export_all``
-    isn't enough; it only exports collections that are in the view layer."""
+    """Runs all exporters of the collection. ``wm.collection_export_all`` isn't
+    enough; it only exports collections that are in the view layer."""
     with bpy.context.temp_override(collection=collection):
         bpy.ops.collection.export_all()
+
+
+def export_models(on_save: bool = False) -> int:
+    """Exports the models of the open .blend, on save only those with auto save
+    on; returns how many."""
+    exported = 0
+    for collection in model_collections():
+        if on_save and not collection.get(C_AUTO, True):
+            continue
+        if any(e.filepath for e in collection.exporters):
+            export_collection(collection)
+            exported += 1
+    return exported
+
+
+def auto_export() -> bool:
+    """Does saving the .blend export it? Stored in the file, the same for everyone."""
+    models = model_collections()
+    return bool(models) and all(bool(c.get(C_AUTO, True)) for c in models)
+
+
+def set_auto_export(enabled: bool) -> None:
+    for collection in model_collections():
+        collection[C_AUTO] = enabled
 
 
 def promote_to_library(obj: bpy.types.Object, root: str) -> str:
@@ -708,18 +782,19 @@ def promote_to_library(obj: bpy.types.Object, root: str) -> str:
         raise BridgeError("%s already exists; pick it as the source" % target)
     os.makedirs(os.path.dirname(target), exist_ok=True)
     collection.pop(P_PREVIEW, None)
-    ensure_exporter(collection, asset_abs(root, asset_src))
+    props = set_export_target(collection, asset_abs(root, asset_src), root, target).export_properties
+    if hasattr(props, "export_apply"):
+        props.export_apply = True   # booleans and other modifiers end up in the .glb
     bpy.data.libraries.write(target, {collection}, fake_user=True)
     forget_models_index()
 
     # The same asset can have several instances in the scene; all are relinked.
     instances = [o for o in bpy.data.objects if o.instance_collection == collection]
-    name = collection.name
     for child in list(collection.all_objects):
         bpy.data.objects.remove(child, do_unlink=True)
     bpy.data.collections.remove(collection)
 
-    linked = _link_library_collection(target, name)
+    linked = _link_library_collection(target, asset_src, root)
     for instance in instances:
         instance.instance_collection = linked
         instance[P_TIER] = "library"
@@ -731,8 +806,9 @@ def new_source(root: str, asset_src: str) -> str:
     """Where *Make source* creates the .blend: at the asset's own path inside
     the models folder when one is set (so the name search finds it for
     everyone), otherwise next to the asset."""
-    expected = expected_source(asset_src)
-    return MODELS_PREFIX + expected if models_folder(root) else expected
+    if models_folder(root):
+        return MODELS_PREFIX + models_relative(root, asset_src)
+    return expected_source(asset_src)
 
 
 # ------------------------------------------------------------ source editing
@@ -747,13 +823,87 @@ COLL_CONTEXT = "BB_Context"
 
 
 def _sessions_path() -> str:
-    """Edits in progress, in Blender's user config, keyed by source file.
-
-    The source can be outside the project (models folder, personal source), so
-    nothing can be found by walking folders up from the open file. One entry per
-    source lets several Blender windows each edit a different model.
+    """Model edits from a scene in progress, in Blender's user config, keyed by
+    source file: the manifest to return to and the model to build the context around.
+    An entry without a manifest is a source Godot just asked to open; it's taken
+    when the file loads. One entry per source lets several Blender windows each
+    edit a different model. What a .blend exports to isn't kept here, it's in the file.
     """
     return os.path.join(bpy.utils.user_resource("CONFIG", create=True), "blenderang_edit.json")
+
+
+def _projects_path() -> str:
+    """Godot projects known on this machine, in Blender's user config. A project
+    is added when Blender opens it from Godot; *Link to Godot* looks among
+    them for the one a .blend belongs to."""
+    return os.path.join(bpy.utils.user_resource("CONFIG", create=True), "blenderang_projects.json")
+
+
+def projects() -> list[str]:
+    try:
+        with open(_projects_path(), encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return []
+    return [str(p) for p in data] if isinstance(data, list) else []
+
+
+def _write_projects(roots: list[str]) -> None:
+    with open(_projects_path(), "w", encoding="utf-8") as handle:
+        json.dump(roots, handle, indent="\t")
+
+
+def remember_project(root: str) -> None:
+    root = os.path.normpath(os.path.abspath(root))
+    known = projects()
+    if not any(_same_file(root, other) for other in known):
+        _write_projects(sorted(known + [root]))
+
+
+def forget_project(root: str) -> None:
+    _write_projects([other for other in projects() if not _same_file(root, other)])
+
+
+def _known_projects() -> list[str]:
+    return [root for root in projects() if os.path.isfile(os.path.join(root, "project.godot"))]
+
+
+def project_for(blend_path: str, name: str = "") -> tuple[str, str]:
+    """(Godot project, ``res://`` path of the .glb) a .blend exports to by
+    convention: next to it when it lies in a project, at the mirrored path when
+    it lies in a project's models folder (the project called ``name`` wins when
+    several share the folder). Elsewhere only the project called ``name``, with
+    no path. Empty strings when nothing fits."""
+    blend_path = host_path(blend_path)
+    known = _known_projects()
+    for root in known:
+        inside = _relative_inside(blend_path, root)
+        if inside:
+            return root, "res://" + os.path.splitext(inside)[0] + ".glb"
+    mirrors = [(root, inside) for root in known
+               for inside in [_relative_inside(blend_path, models_folder(root))] if inside]
+    if mirrors:
+        root, inside = next((m for m in mirrors if name and project_name(m[0]) == name), mirrors[0])
+        return root, models_asset(root, inside)
+    if name:
+        return next((root for root in known if project_name(root) == name), ""), ""
+    return "", ""
+
+
+def suggested_asset(root: str, blend_path: str, folder: str | None = None) -> tuple[str, bool]:
+    """``res://`` path of the .glb a .blend exports to in the project ``root``, and
+    whether it follows the file's place: inside the project next to it, inside
+    the models folder (``folder``, default the project's) at the mirrored path.
+    Elsewhere only a guess, the mirrored folder + the file's name."""
+    blend_path = host_path(blend_path)
+    inside = _relative_inside(blend_path, root)
+    if inside:
+        return "res://" + os.path.splitext(inside)[0] + ".glb", True
+    folder = models_folder(root) if folder is None else os.path.abspath(bpy.path.abspath(folder)) if folder else ""
+    inside = _relative_inside(blend_path, folder)
+    if inside:
+        return models_asset(root, inside), True
+    return models_asset(root, os.path.basename(blend_path)), False
 
 
 def _session_key(path: str) -> str:
@@ -780,8 +930,11 @@ def _write_sessions(sessions: dict[str, Any]) -> None:
 
 
 def _start_session(session: dict[str, Any]) -> None:
-    sessions = _read_sessions()
-    sessions[_session_key(session["source"])] = session
+    """Writes the session; entries of files that no longer exist are dropped."""
+    key = _session_key(session["source"])
+    sessions = {other: value for other, value in _read_sessions().items()
+                if isinstance(value, dict) and os.path.isfile(str(value.get("source", "")))}
+    sessions[key] = session
     _write_sessions(sessions)
 
 
@@ -806,7 +959,6 @@ def begin_edit(scene: bpy.types.Scene, obj: bpy.types.Object) -> str:
         "bb_id": str(obj.get(P_ID, "")),
         "source": os.path.abspath(source),
         "asset": str(obj.get(P_SRC, "")),
-        "collection": obj.instance_collection.name if obj.instance_collection else "",
         "root": root,
     })
     return source
@@ -814,45 +966,156 @@ def begin_edit(scene: bpy.types.Scene, obj: bpy.types.Object) -> str:
 
 def begin_source_edit(root: str, asset_src: str, source: str) -> str:
     """Prepares editing a source opened straight from Godot's FileSystem: no
-    scene around it, but saving regenerates the asset in this project."""
+    scene around it. Loading the file takes the entry (``take_opened_source``)
+    and makes the model export to the asset."""
     if not os.path.isfile(source):
         raise BridgeError("source does not exist: %s" % source)
-    stem = os.path.basename(asset_src).rsplit(".", 1)[0]
     with bpy.data.libraries.load(source) as (data_from, _):
         available = list(data_from.collections)
     if not available:
         raise BridgeError("%s contains no collection" % source)
+    remember_project(root)
     _start_session({
         "manifest": "",
         "bb_id": "",
         "source": os.path.abspath(source),
         "asset": asset_src,
-        "collection": _pick_collection(available, stem),
         "root": root,
     })
     return source
 
 
-def edit_session() -> dict[str, Any] | None:
-    """Details of the edit in progress, if its source is the file currently open."""
+def _open_file_session() -> dict[str, Any] | None:
     if not bpy.data.filepath:
         return None
     session = _read_sessions().get(_session_key(bpy.data.filepath))
     return dict(session) if isinstance(session, dict) and "root" in session else None
 
 
-def end_edit(session: dict[str, Any]) -> str:
-    """Ends scene-context editing but keeps the source's export binding.
+def edit_session() -> dict[str, Any] | None:
+    """The model edit from a scene in progress, if its source is the file currently open."""
+    session = _open_file_session()
+    return session if session is not None and session.get("manifest") else None
 
-    Reopening the source by hand still exports on save, without restoring the
-    old scene context. Returns the manifest to rebuild the scene from.
+
+def take_opened_source() -> dict[str, Any] | None:
+    """The open file's entry from *Open source in Blender*, removed once taken.
+    Entries from older versions, which bound a source to its asset on this
+    machine, are taken the same way; the binding moves into the file."""
+    session = _open_file_session()
+    if session is None or session.get("manifest"):
+        return None
+    sessions = _read_sessions()
+    sessions.pop(_session_key(bpy.data.filepath), None)
+    _write_sessions(sessions)
+    return session
+
+
+def file_root() -> str:
+    """The Godot project the open .blend exports into, on this disk; empty when
+    it isn't linked. Found from the file's place (in a project or its models
+    folder), then by the project name the file carries; a file without a name
+    uses the only known project."""
+    session = edit_session()
+    if session is not None:
+        return session["root"]
+    models = linked_models()
+    if not models or not bpy.data.filepath:
+        return ""
+    name = next((str(c[C_PROJECT]) for c in models if c.get(C_PROJECT)), "")
+    root = project_for(bpy.data.filepath, name)[0]
+    if not root and not name:
+        known = _known_projects()
+        root = known[0] if len(known) == 1 else ""
+    return root
+
+
+def follow_save_as(filepath: str) -> None:
+    """Save As and incremental save during a model edit from a scene: the new
+    file goes on with the edit. The link to Godot needs nothing, it's in the file."""
+    if not filepath or not bpy.data.filepath or _same_file(filepath, bpy.data.filepath):
+        return
+    session = edit_session()
+    if session is not None:
+        session["source"] = os.path.abspath(filepath)
+        _start_session(session)
+
+
+def link_file(scene: bpy.types.Scene, view_layer: bpy.types.ViewLayer, project: str, target: str, auto: bool) -> None:
+    """*Link to Godot*: the models of the open .blend export into the project with
+    *Export now*, with ``auto`` on every save too. All of it is stored in the
+    file, so it's linked the same way for everyone.
+
+    A file that exports nothing yet gets a glTF exporter for ``target`` (``res://``
+    path or file path) on the active collection; with the Scene Collection active,
+    on a new collection named after the file that takes over the scene's objects.
+    Apply modifiers is on so booleans end up in the .glb; the rest is Blender's defaults.
+    A file that already exports (linked elsewhere, renamed) keeps its targets.
     """
-    manifest = session["manifest"]
-    binding = dict(session)
-    binding["manifest"] = ""
-    binding["bb_id"] = ""
-    _start_session(binding)
-    return manifest
+    if not bpy.data.filepath:
+        raise BridgeError("save the file first")
+    root = os.path.normpath(os.path.abspath(bpy.path.abspath(project))) if project.strip() else ""
+    if not root or not os.path.isfile(os.path.join(root, "project.godot")):
+        raise BridgeError("pick the Godot project folder (the one with project.godot)")
+    if not model_collections():
+        target = target.strip()
+        if not target:
+            raise BridgeError("set where in the project the model is exported to")
+        absolute = asset_abs(root, target) if target.startswith("res://") else os.path.abspath(bpy.path.abspath(target))
+        if not absolute.lower().endswith((".glb", ".gltf")):
+            raise BridgeError("export to a .glb or .gltf file")
+        if not _relative_inside(absolute, root):
+            raise BridgeError("export into the Godot project")
+        collection = view_layer.active_layer_collection.collection
+        if collection.library is not None:
+            raise BridgeError("the active collection is linked from another file")
+        if collection == scene.collection:
+            collection = bpy.data.collections.new(os.path.splitext(os.path.basename(bpy.data.filepath))[0])
+            scene.collection.children.link(collection)
+            for obj in list(scene.collection.objects):
+                collection.objects.link(obj)
+                scene.collection.objects.unlink(obj)
+            activate_collection(view_layer, collection)
+        props = set_export_target(collection, absolute, root).export_properties
+        if hasattr(props, "export_apply"):
+            props.export_apply = True
+    remember_export_paths(root)
+    if not linked_models():
+        raise BridgeError("the file's exporters don't write into the Godot project")
+    set_auto_export(auto)
+    remember_project(root)
+    localize_export_paths(root)
+    forget_models_index()
+
+
+def godot_status(root: str, asset_src: str) -> tuple[str, bool]:
+    """What exporting the asset means in Godot, for the open file: (text, problem).
+
+    Linked: Godot resolves the asset's source to this .blend (``source_of``, the
+    same rule as BBPaths), so *Edit* in Godot opens it. A problem is an asset whose
+    source is another .blend, or one Godot won't find this file for.
+    """
+    exists = os.path.isfile(asset_abs(root, asset_src))
+    stored = source_of({"src": asset_src}, root)
+    source = source_abs(root, stored) if stored else ""
+    if source and _same_file(source, host_path(bpy.data.filepath)):
+        return ("in Godot, linked to this file; export overwrites it" if exists
+                else "new in Godot, linked to this file"), False
+    if source:
+        return "in Godot, its source is %s; export overwrites it" % stored, True
+    if exists:
+        return "in Godot without this file as its source; export overwrites it", True
+    return "new in Godot; it won't find this file as its source", True
+
+
+def end_edit(session: dict[str, Any]) -> str:
+    """Ends the model edit from a scene. The source stays linked to its asset by
+    the file itself, so reopening it by hand still exports on save, without the
+    scene context. Returns the manifest to rebuild the scene from."""
+    sessions = _read_sessions()
+    sessions.pop(_session_key(session["source"]), None)
+    _write_sessions(sessions)
+    return session["manifest"]
 
 
 def build_context(session: dict[str, Any]) -> int:
@@ -873,7 +1136,7 @@ def build_context(session: dict[str, Any]) -> int:
         return 0
     root = session["root"]
     to_local = godot_to_blender(focus["xform"]).inverted()
-    edited = bpy.data.collections.get(session.get("collection", ""))
+    edited = session_collection(session)
 
     context = bpy.data.collections.new(COLL_CONTEXT)
     bpy.context.scene.collection.children.link(context)
@@ -917,7 +1180,12 @@ def clear_context() -> None:
 
 
 def session_collection(session: dict[str, Any]) -> bpy.types.Collection | None:
-    return bpy.data.collections.get(session.get("collection", ""))
+    """The collection of the model being edited from Godot, if there is one."""
+    if not session.get("asset"):
+        return None
+    own = [c for c in bpy.data.collections
+           if c.library is None and c.name != COLL_CONTEXT and not c.get(P_PREVIEW)]
+    return model_collection(own, session["asset"], session["root"])
 
 
 def activate_collection(view_layer: bpy.types.ViewLayer, collection: bpy.types.Collection) -> bool:
@@ -932,18 +1200,19 @@ def activate_collection(view_layer: bpy.types.ViewLayer, collection: bpy.types.C
     return False
 
 
-def collection_has_exporter(session: dict[str, Any]) -> bool:
+def setup_session_exporter(session: dict[str, Any]) -> bpy.types.Collection | None:
+    """Makes sure the edited model exports to its asset: an exporter with Blender's
+    defaults for a source that has none, the asset's path for one exported elsewhere
+    (made on another disk before the path was shared). Other settings stay as they are."""
     collection = session_collection(session)
-    return collection is not None and any(e.filepath for e in collection.exporters)
-
-
-def setup_session_exporter(session: dict[str, Any]) -> str:
-    collection = bpy.data.collections.get(session.get("collection", ""))
     if collection is None:
-        raise BridgeError("the file is missing collection %s" % session.get("collection"))
-    target = asset_abs(session["root"], session["asset"])
-    ensure_exporter(collection, target)
-    return target
+        if session.get("asset"):
+            raise BridgeError("the file has no collection for %s" % session["asset"])
+        return None
+    asset = session["asset"]
+    if exported_asset(collection, session["root"]) != asset or collection.get(C_ASSET) != asset:
+        set_export_target(collection, asset_abs(session["root"], asset), session["root"])
+    return collection
 
 
 # ------------------------------------------------------------------ detail
@@ -1049,6 +1318,61 @@ def models_folder(root: str) -> str:
     return os.path.normpath(folder) if folder else ""
 
 
+# Project setting (Project Settings ▸ Blenderang ▸ Models ▸ Project Folder): the
+# folder of the Godot project the models folder mirrors. With the default, the
+# source of ``res://assets/levels/castle.glb`` is ``levels/castle.blend`` in the
+# models folder. Godot doesn't write a default value to project.godot.
+SETTING_MIRROR_SECTION = "blenderang"
+SETTING_MIRROR_KEY = "models/project_folder"
+DEFAULT_MIRROR = "assets"
+
+
+def _project_setting(root: str, section: str, key: str, default: str) -> str:
+    """A string value from ``project.godot``; ``default`` when it isn't there."""
+    value = default
+    current = ""
+    try:
+        with open(os.path.join(root, "project.godot"), encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if line.startswith("["):
+                    current = line.strip("[]")
+                elif current == section and line.startswith(key + "="):
+                    value = line.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return value
+
+
+def models_mirror(root: str) -> str:
+    """The project folder the models folder mirrors, without slashes; may be empty."""
+    value = _project_setting(root, SETTING_MIRROR_SECTION, SETTING_MIRROR_KEY, DEFAULT_MIRROR)
+    return value.replace("\\", "/").strip("/")
+
+
+def project_name(root: str) -> str:
+    """The project's name (``application/config/name``); a .blend keeps it to find
+    the project on another disk."""
+    return _project_setting(root, "application", "config/name", "")
+
+
+def models_relative(root: str, asset_src: str) -> str:
+    """Where the asset's source sits in the models folder by convention: the
+    asset's path without the mirrored project folder (``res://assets/levels/castle.glb``
+    → ``levels/castle.blend``). Assets outside that folder keep their whole path."""
+    expected = expected_source(asset_src)
+    mirror = models_mirror(root)
+    return expected[len(mirror) + 1:] if mirror and expected.startswith(mirror + "/") else expected
+
+
+def models_asset(root: str, relative_blend: str) -> str:
+    """The opposite direction: ``res://`` path of the .glb a .blend at this path
+    in the models folder exports to by convention."""
+    mirror = models_mirror(root)
+    base = os.path.splitext(relative_blend.replace(os.sep, "/"))[0] + ".glb"
+    return "res://" + (mirror + "/" if mirror else "") + base
+
+
 # .blend files in the models folder: folder → lowercase name → sorted paths inside it.
 # Scanned once per scene build; ``forget_models_index`` drops it.
 _MODELS_INDEX: dict[str, dict[str, list[str]]] = {}
@@ -1080,13 +1404,13 @@ def find_in_models_folder(root: str, asset_src: str) -> str:
     """``models://…`` path of ``<asset name>.blend`` in the models folder, or empty.
 
     The name is matched case-insensitively at any depth. With several matches the
-    one at the asset's own path (``levels/castle/castle.blend``) wins, otherwise
+    one at the asset's mirrored path (``models_relative``) wins, otherwise
     the first alphabetically; picking the source by hand makes it explicit.
     """
     folder = models_folder(root)
     if not folder:
         return ""
-    expected = expected_source(asset_src)
+    expected = models_relative(root, asset_src)
     name = os.path.basename(expected)
     matches = _models_index(folder).get(name.lower(), [])
     if not matches:
@@ -1109,6 +1433,25 @@ def _relative_inside(path: str, folder: str) -> str:
     if relative == os.pardir or relative.startswith(os.pardir + os.sep) or os.path.isabs(relative):
         return ""
     return relative.replace(os.sep, "/")
+
+
+def res_path(root: str, path: str) -> str:
+    """``res://`` path of a file path inside the project, or empty when it's outside."""
+    inside = _relative_inside(os.path.abspath(bpy.path.abspath(path)), root) if root and path else ""
+    return "res://" + inside if inside else ""
+
+
+def host_path(path: str) -> str:
+    """Where the file really is. Flatpak Blender gets a file opened from the file
+    manager through the document portal, as ``/run/user/<uid>/doc/<id>/<name>``;
+    the portal keeps the real path in an extended attribute. Other paths are
+    returned as they are."""
+    if path and hasattr(os, "getxattr"):
+        try:
+            return os.fsdecode(os.getxattr(path, "user.document-portal.host-path"))
+        except OSError:
+            pass
+    return path
 
 
 def source_choice(root: str, asset_src: str) -> str:
@@ -1145,8 +1488,7 @@ def choose_source(scene: bpy.types.Scene, asset_src: str, blend_path: str) -> tu
         stored = MODELS_PREFIX + inside_models if inside_models else ""
     personal = not stored
 
-    stem = os.path.basename(asset_src).rsplit(".", 1)[0]
-    collection = _link_library_collection(absolute, stem)
+    collection = _link_library_collection(absolute, asset_src, root)
     if personal:
         stored = absolute
         _write_local(root, asset_src, absolute)
@@ -1185,18 +1527,24 @@ def set_models_folder(scene: bpy.types.Scene, folder: str) -> None:
     root = scene.get(S_ROOT, "")
     if not root:
         raise BridgeError("the scene has no manifest loaded")
+    store_models_folder(root, folder)
+    for asset_src in sorted({str(obj.get(P_SRC, "")) for obj in scene_models(scene)}):
+        _relink(scene, root, asset_src)
+
+
+def store_models_folder(root: str, folder: str) -> None:
+    """Writes where the project's models folder is on this disk (empty unsets it)
+    to its personal settings, which Godot reads too."""
     settings = _read_local_json(root, LOCAL_SETTINGS)
     if folder:
-        folder = os.path.abspath(folder)
+        folder = os.path.abspath(bpy.path.abspath(folder))
         if not os.path.isdir(folder):
-            raise BridgeError("pick an existing folder")
+            raise BridgeError("pick an existing models folder")
         settings["models_folder"] = folder.replace(os.sep, "/")
     else:
         settings.pop("models_folder", None)
     _write_local_json(root, LOCAL_SETTINGS, settings)
     forget_models_index()
-    for asset_src in sorted({str(obj.get(P_SRC, "")) for obj in scene_models(scene)}):
-        _relink(scene, root, asset_src)
 
 
 def _relink(scene: bpy.types.Scene, root: str, asset_src: str) -> None:
