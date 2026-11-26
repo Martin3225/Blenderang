@@ -12,7 +12,10 @@ Two modes:
 
 from __future__ import annotations
 
+import json
 import os
+import textwrap
+import traceback
 
 import bpy
 from bpy.app.handlers import persistent
@@ -27,15 +30,62 @@ def _report(operator: bpy.types.Operator, error: Exception) -> set[str]:
     return {"CANCELLED"}
 
 
+# Why the last opening of a scene from Godot failed, for the panel: the popup
+# goes away, and the failed scene leaves an empty file behind.
+_OPEN_ERROR = {"message": ""}
+
+
 def _open_scene(manifest: str) -> None:
-    bpy.ops.wm.read_homefile(use_empty=True)
-    # After read_homefile the new scene is in the window; from a timer or a
-    # handler bpy.context wouldn't point to the 3D view (see bridge.ui_context).
-    with bpy.context.temp_override(**bridge.ui_context()):
-        scene = bpy.context.scene
-        bridge.build(scene, manifest)
-        scene.name = os.path.splitext(os.path.basename(manifest))[0]
+    try:
+        bpy.ops.wm.read_homefile(use_empty=True)
+        # After read_homefile the new scene is in the window; from a timer or a
+        # handler bpy.context wouldn't point to the 3D view (see bridge.ui_context).
+        with bpy.context.temp_override(**bridge.ui_context()):
+            scene = bpy.context.scene
+            bridge.build(scene, manifest)
+            scene.name = os.path.splitext(os.path.basename(manifest))[0]
+    except Exception as error:   # noqa: BLE001 — any failure must reach the user, not only the console
+        _OPEN_ERROR["message"] = _open_failure(manifest, error)
+        if not bpy.app.background:
+            # Deferred: opening the sidebar inside the operator that just ran
+            # read_homefile crashes Blender (5.3).
+            bpy.app.timers.register(_show_panel, first_interval=0.1)
+        raise bridge.BridgeError(_OPEN_ERROR["message"]) from error
     _frame_models()
+
+
+def _open_failure(manifest: str, error: Exception) -> str:
+    """A readable reason why the scene couldn't be built from ``manifest``."""
+    if isinstance(error, bridge.BridgeError):
+        return str(error)
+    if isinstance(error, json.JSONDecodeError):
+        return "the manifest %s is not valid JSON (%s)" % (manifest, error)
+    if isinstance(error, OSError):
+        return "cannot read %s (%s)" % (manifest, error.strerror or error)
+    traceback.print_exc()
+    return "unexpected error while building %s: %s: %s (details in the system console)" % (
+        os.path.basename(manifest), type(error).__name__, error)
+
+
+def _show_panel(attempts: int = 20) -> float | None:
+    """Opens the sidebar on the Blenderang tab, where the error stays after the
+    popup goes away. A timer: the tab can be picked only once the opened sidebar
+    has drawn, until then the property is read-only."""
+    pending = False
+    for window in bpy.context.window_manager.windows:
+        for area in window.screen.areas:
+            if area.type != "VIEW_3D":
+                continue
+            area.spaces.active.show_region_ui = True
+            for region in area.regions:
+                if region.type == "UI":
+                    try:
+                        region.active_panel_category = BB_PT_panel.bl_category
+                    except AttributeError:
+                        pending = True
+    if pending and attempts > 1:
+        bpy.app.timers.register(lambda: _show_panel(attempts - 1), first_interval=0.1)
+    return None
 
 
 def _frame_models() -> None:
@@ -688,6 +738,7 @@ class BB_Preferences(bpy.types.AddonPreferences):
 def _on_load_post(_: object) -> None:
     bridge.forget_models_index()
     _SHOWN.update(model="", over="")
+    _OPEN_ERROR["message"] = ""   # a failed build sets it again after its read_homefile
     session = bridge.edit_session() or bridge.take_opened_source()
     if session is not None and session["asset"]:
         scene = bpy.context.scene
@@ -812,6 +863,14 @@ class BB_PT_panel(bpy.types.Panel):
 
     def _draw_unbound(self, context: bpy.types.Context) -> None:
         layout = self.layout
+        if _OPEN_ERROR["message"]:
+            error = layout.box()
+            error.alert = True
+            error.label(text="Opening from Godot failed:", icon="ERROR")
+            # Labels don't wrap; roughly the characters that fit the sidebar.
+            width = max(20, int(context.region.width / (8 * context.preferences.system.ui_scale)))
+            for line in textwrap.wrap(_OPEN_ERROR["message"], width):
+                error.label(text=line)
         layout.label(text="Open a scene from Godot with the Blender button.", icon="INFO")
         box = layout.box()
         if not bpy.data.filepath:

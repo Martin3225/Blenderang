@@ -36,11 +36,33 @@ static func source_expression(source_abs: String, asset: String, root_abs: Strin
 ## In the GUI the call is deferred with a timer, because during
 ## [code]--python-expr[/code] no window exists yet and the operator would have
 ## no context. In [code]--background[/code] timers don't run, so it's called right away.
+##
+## A failure would otherwise only reach Blender's console and leave an empty
+## window: it's shown in a popup (in the background re-raised). Without the
+## extension the operator doesn't exist, which gets its own message.
 static func _deferred_call(call: String) -> String:
 	return "\n".join([
 		"import bpy",
+		"def _bb_fail(error):",
+		"    message = str(error).strip().removeprefix('Error: ')",
+		"    if 'could not be found' in message:",
+		"        message = 'The Blenderang extension is not installed or enabled in this Blender,\\nor it is older than the Godot plugin.'",
+		"    print('Blenderang:', message)",
+		"    if bpy.app.background:",
+		"        raise RuntimeError('Blenderang: ' + message) from None",
+		"    wm = bpy.context.window_manager",
+		"    def draw(menu, _context):",
+		"        import textwrap",
+		"        for paragraph in message.splitlines():",
+		"            for line in textwrap.wrap(paragraph, 100):",
+		"                menu.layout.label(text=line)",
+		"    with bpy.context.temp_override(window=wm.windows[0]):",
+		"        wm.popup_menu(draw, title='Blenderang: opening from Godot failed', icon='ERROR')",
 		"def _bb_open():",
-		"    " + call,
+		"    try:",
+		"        " + call,
+		"    except Exception as error:",
+		"        _bb_fail(error)",
 		"if bpy.app.background:",
 		"    _bb_open()",
 		"else:",
@@ -66,7 +88,10 @@ static func _launch(expression: String) -> Error:
 		)
 		return ERR_FILE_NOT_FOUND
 	var pid: int = OS.create_process(executable, python_args(expression))
-	return OK if pid > 0 else FAILED
+	if pid <= 0:
+		push_error("Blenderang: could not start Blender (%s)." % executable)
+		return FAILED
+	return OK
 
 
 ## Blender arguments that run [param expression].

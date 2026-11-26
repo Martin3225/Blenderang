@@ -1,11 +1,14 @@
 """Building the scene in Blender from the manifest (Godot → Blender)."""
 
+import base64
 import math
 import os
+import re
 import shutil
 
 import bpy
 
+import blenderang
 import blenderang.bridge as bridge
 from harness import ASSETS, BridgeCase, godot_to_blender_point
 import harness
@@ -196,6 +199,40 @@ class ResilienceTest(BridgeCase):
     def test_clean_build_has_no_warnings(self):
         scene = self.open_scene()
         self.assertEqual(list(scene[bridge.S_WARNINGS]), [])
+
+
+class OpenFailureTest(BridgeCase):
+    """A scene that can't be opened from Godot says why, not only in the console."""
+
+    def startup_python(self) -> str:
+        """The Python Godot passes to Blender, decoded from its base64 wrapper."""
+        with open(os.path.join(harness.PIPELINE, "startup_expr.py"), encoding="utf-8") as handle:
+            encoded = re.search(r"b64decode\('([A-Za-z0-9+/=]*)'\)", handle.read()).group(1)
+        return base64.b64decode(encoded).decode("utf-8")
+
+    def test_unreadable_manifest_is_reported_and_kept_for_the_panel(self):
+        with open(self.manifest_path(), "w", encoding="utf-8") as handle:
+            handle.write("{")
+        with self.assertRaisesRegex(RuntimeError, "basic.json is not valid JSON"):
+            bpy.ops.bb.open_from_godot(filepath=self.manifest_path())
+        self.assertIn("not valid JSON", blenderang._OPEN_ERROR["message"], "the panel shows it")
+        self._restore()
+        self.open_scene()
+        self.assertEqual(blenderang._OPEN_ERROR["message"], "", "a successful open clears it")
+
+    def test_startup_python_reports_a_missing_manifest(self):
+        startup = self.startup_python().replace("basic.json", "missing.json")
+        with self.assertRaisesRegex(RuntimeError, "Blenderang: manifest does not exist: .*missing.json"):
+            exec(startup, {})
+
+    def test_startup_python_without_the_extension(self):
+        startup = self.startup_python()
+        blenderang.unregister()
+        try:
+            with self.assertRaisesRegex(RuntimeError, "Blenderang extension is not installed or enabled"):
+                exec(startup, {})
+        finally:
+            blenderang.register()
 
 
 class DetailTest(BridgeCase):

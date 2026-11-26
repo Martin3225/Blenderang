@@ -415,7 +415,7 @@ You can commit `.pipeline/` or ignore it. Everything in it can be rebuilt.
 | problem | fix |
 |---|---|
 | Clicking **Blender** does nothing | Check the Blender path in Editor Settings. |
-| Blender opens but the panel says to open a scene from Godot | The Blender extension isn't enabled, or the versions don't match. |
+| Blender opens without the scene | A popup and the *Blenderang* sidebar tab say why (missing or broken manifest, extension not enabled or older than the Godot plugin). |
 | A model shows as an empty axis | Its `.glb` failed to load. The panel lists the error in red. |
 | My edits didn't come back to Godot | Only nodes with `bb_id` are updated. Check that the node is marked. |
 
