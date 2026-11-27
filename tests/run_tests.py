@@ -14,8 +14,8 @@ Suites:
 * ``editor`` — a real headless Godot editor: toolbar button, context menu,
   automatic loading of changes from Blender
 * ``e2e``    — the whole Godot → Blender → Godot cycle through files on disk
-* ``gui``    — Blender with a window on a virtual display (Xvfb): start from Godot,
-  panel, view framing, model editing; skipped on Windows and without Xvfb
+* ``gui``    — Blender with a window: start from Godot, panel, view framing,
+  model editing. Uses the Windows desktop or Xvfb on Linux.
 
 Works only inside ``tests/.work``: fixtures are copied, the add-on is added
 from the repo, Godot gets its own config folder (it doesn't touch your
@@ -106,7 +106,7 @@ def find_terrain3d(explicit: str | None) -> Path | None:
     try:
         CACHE.mkdir(parents=True, exist_ok=True)
         if not archive.exists():
-            print(f"… stahuji Terrain3D {TERRAIN3D_VERSION}")
+            print(f"Downloading Terrain3D {TERRAIN3D_VERSION}")
             urllib.request.urlretrieve(TERRAIN3D_URL, archive)
         with zipfile.ZipFile(archive) as bundle:
             for member in bundle.namelist():
@@ -152,15 +152,15 @@ class Tools:
         try:
             result = subprocess.run(
                 command, cwd=REPO, env=env, timeout=timeout,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding="utf-8", errors="replace",
             )
             output = result.stdout
         except subprocess.TimeoutExpired as expired:
-            output = (expired.stdout or "") if isinstance(expired.stdout, str) else ""
+            output = (expired.stdout or b"").decode("utf-8", errors="replace")
             output += f"\n!!! TIMEOUT after {timeout} s"
             result = subprocess.CompletedProcess(command, 124, output)
         (LOGS / f"{name}.log").write_text(
-            f"$ {' '.join(command)}\n({time.monotonic() - started:.1f} s, kód {result.returncode})\n\n{output}",
+            f"$ {' '.join(command)}\n({time.monotonic() - started:.1f} s, exit code {result.returncode})\n\n{output}",
             encoding="utf-8",
         )
         return result
@@ -327,28 +327,33 @@ def _free_display() -> int:
 
 
 def suite_gui(tools: Tools) -> list[dict]:
-    if WINDOWS or shutil.which("Xvfb") is None:
-        return [{"suite": "gui", "name": "Blender s oknem", "status": "skip",
-                 "message": "needs Xvfb (Linux)"}]
+    if not WINDOWS and shutil.which("Xvfb") is None:
+        return [{"suite": "gui", "name": "Blender window", "status": "skip",
+                 "message": "needs Xvfb"}]
     export_manifests(tools)
     expression = (PROJECT / ".pipeline" / "startup_expr.py").read_text(encoding="utf-8")
-    display = _free_display()
-    server = subprocess.Popen(
-        ["Xvfb", f":{display}", "-screen", "0", "1600x1000x24", "-ac", "-nolisten", "tcp"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
+    env = tools.blender_env()
+    server = None
     try:
-        time.sleep(1.5)
-        env = {k: v for k, v in tools.blender_env().items() if k not in ("WAYLAND_DISPLAY", "XAUTHORITY")}
-        env["DISPLAY"] = f":{display}"
+        if not WINDOWS:
+            display = _free_display()
+            server = subprocess.Popen(
+                ["Xvfb", f":{display}", "-screen", "0", "1600x1000x24", "-ac", "-nolisten", "tcp"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            time.sleep(1.5)
+            env.pop("WAYLAND_DISPLAY", None)
+            env.pop("XAUTHORITY", None)
+            env["DISPLAY"] = f":{display}"
         tools.run("gui", [
             tools.blender, "--factory-startup", "--python-expr", expression,
             "--python", str(TESTS / "blender" / "gui_check.py"),
             "--", "--repo", str(REPO), "--project", str(PROJECT), "--out", str(OUT),
         ], timeout=240, env=env)
     finally:
-        server.terminate()
-        server.wait(timeout=10)
+        if server is not None:
+            server.terminate()
+            server.wait(timeout=10)
     return results_from(OUT / "gui.json", "gui", "gui.log")
 
 
@@ -399,6 +404,8 @@ def report(results: list[dict]) -> int:
 
 
 def main() -> int:
+    # Redirected Windows consoles may use a code page that cannot print test names.
+    sys.stdout.reconfigure(errors="backslashreplace")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--godot")
     parser.add_argument("--blender")

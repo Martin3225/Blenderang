@@ -1,4 +1,4 @@
-"""Blender GUI tests (with a window, on a virtual display).
+"""Blender GUI tests on the Windows desktop or an Xvfb display.
 
 Covers what can't be done in the background: starting via a timer from Godot's
 startup Python, drawing the panel in both modes, framing the view after opening
