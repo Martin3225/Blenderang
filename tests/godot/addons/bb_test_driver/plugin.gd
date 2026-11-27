@@ -61,7 +61,7 @@ func _phase_open_and_watch(bridge: EditorPlugin) -> void:
 	var manifest: String = ProjectSettings.globalize_path("res://.pipeline/basic.json")
 	_record("the button launches Blender with the manifest",
 		args.size() == 2 and args[0] == "--python-expr" and args[1].contains(JSON.stringify(manifest)),
-		"argumenty: %s" % [args])
+		"arguments: %s" % [args])
 	_record("startup Python calls bb.open_from_godot", args.size() == 2 and args[1].contains("bpy.ops.bb.open_from_godot"), "")
 
 	var root: Node = EditorInterface.get_edited_scene_root()
@@ -90,7 +90,7 @@ func _phase_open_and_watch(bridge: EditorPlugin) -> void:
 	var version: int = history.get_version()
 	await get_tree().create_timer(WATCH_WAIT).timeout
 	_record("own manifest write is not loaded back", history.get_version() == version and crate.position.is_equal_approx(Vector3(2, 0, 3)),
-		"verze historie %d → %d" % [version, history.get_version()])
+		"history version %d to %d" % [version, history.get_version()])
 
 	_move_in_manifest("res://.pipeline/basic.json", "Crate", Vector3(7, 0, 3))
 	var started: int = Time.get_ticks_msec()
@@ -250,7 +250,7 @@ func _fake_blender_args() -> PackedStringArray:
 	for _attempt: int in 300:
 		if FileAccess.file_exists(record):
 			await get_tree().create_timer(0.2).timeout
-			var lines: PackedStringArray = FileAccess.get_file_as_string(record).strip_edges().split("\n")
+			var lines: PackedStringArray = FileAccess.get_file_as_string(record).replace("\r\n", "\n").strip_edges().split("\n")
 			DirAccess.remove_absolute(record)
 			if lines.size() != 2:
 				return lines

@@ -375,7 +375,7 @@ You can commit `.pipeline/` or ignore it. Everything in it can be rebuilt.
   basic materials, but not shader node setups or modifiers.
 - Terrain3D terrain is a read-only preview in Blender, shown as an unlit
   colour map because its shader can't be reproduced there.
-- macOS is untested. Windows isn't covered by the automated GUI tests.
+- macOS is untested.
 
 ## Troubleshooting
 
@@ -395,7 +395,10 @@ python tests/run_tests.py --regen-fixtures # regenerate test scenes
 ```
 
 You need Python 3, Godot and Blender (on `PATH`, in `$GODOT` / `$BLENDER`, or
-passed with `--godot` / `--blender`). On Linux the GUI suite needs `Xvfb`.
+passed with `--godot` / `--blender`). For the Godot Windows ZIP, point
+`--godot` at the `_console.exe` executable. Run the GUI suite from an
+interactive Windows desktop session or with `Xvfb` installed on Linux.
+On Windows, the GUI suite opens and closes a Blender window.
 Tests run in an isolated copy under `tests/.work` with their own Godot and
 Blender config, so they never touch your settings or your game project.
 
